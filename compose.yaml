@@ -18,12 +18,14 @@ services:
         source: ${WSI_OVERLAYS_DIR:-./data/overlays}
         target: /data/overlays
         read_only: true
-      - type: volume
-        source: crops
+      - type: bind
+        source: ${WSI_SLIDES_DIR:-./data/crops}
         target: /data/crops
-      - type: volume
-        source: uploads
+        read_only: false
+      - type: bind
+        source: ${WSI_SLIDES_DIR:-./data/uploads}
         target: /data/uploads
+        read_only: false
     command:
       - --host
       - 0.0.0.0
