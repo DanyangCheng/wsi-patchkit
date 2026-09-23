@@ -539,6 +539,12 @@ main {
   grid-column: span 1;
 }
 
+.crop-level-mpp {
+  color: #a5f5e1;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
 #crop-save {
   width: 100%;
 }

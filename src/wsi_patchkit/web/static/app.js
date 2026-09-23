@@ -25,6 +25,7 @@
   const cropWidth = document.querySelector("#crop-width");
   const cropHeight = document.querySelector("#crop-height");
   const cropLevel = document.querySelector("#crop-level");
+  const cropLevelMpp = document.querySelector("#crop-level-mpp");
   const cropFormat = document.querySelector("#crop-format");
   const cropFilename = document.querySelector("#crop-filename");
   const cropSave = document.querySelector("#crop-save");
@@ -456,6 +457,23 @@
     );
   }
 
+  function updateCropLevelMpp() {
+    const level = selectedCropLevel();
+    const mpp = level?.mpp || (
+      currentSlide?.mpp && level?.downsample
+        ? currentSlide.mpp.map((value, axis) => value * level.downsample[axis])
+        : null
+    );
+    if (!mpp) {
+      cropLevelMpp.textContent = "MPP 未知";
+      return;
+    }
+    const format = (value) => Number(value.toPrecision(4)).toString();
+    cropLevelMpp.textContent = mpp[0] === mpp[1]
+      ? `MPP ${format(mpp[0])} µm/px`
+      : `MPP x ${format(mpp[0])} · y ${format(mpp[1])} µm/px`;
+  }
+
   function populateCropLevels() {
     if (!currentSlide) return;
     const previous = cropLevel.value;
@@ -471,6 +489,7 @@
     cropLevel.value = levels.some((level) => String(level.level) === previous)
       ? previous
       : "0";
+    updateCropLevelMpp();
   }
 
   function setCropRegion(region, updateInputs = true) {
@@ -894,6 +913,7 @@
       input.addEventListener("change", syncCropInputs);
     }
     cropLevel.addEventListener("change", () => {
+      updateCropLevelMpp();
       initializeCropRegion();
       setCropStatus("");
     });
