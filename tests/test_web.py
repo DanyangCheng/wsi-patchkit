@@ -22,6 +22,11 @@ from wsi_patchkit.web.__main__ import (  # noqa: E402
 )
 
 
+@pytest.fixture(autouse=True)
+def isolate_default_upload_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.chdir(tmp_path)
+
+
 def _write_slide(path: Path) -> None:
     image = np.arange(16 * 20 * 3, dtype=np.uint8).reshape(16, 20, 3)
     tifffile.imwrite(
@@ -363,7 +368,7 @@ async def test_viewer_serves_metadata_tiles_and_frontend(tmp_path: Path) -> None
     assert index.status_code == 200
     assert "WSI PatchKit Viewer" in index.text
     assert "/static/styles.css?v=12" in index.text
-    assert "/static/app.js?v=14" in index.text
+    assert "/static/app.js?v=15" in index.text
     assert script.status_code == 200
     assert "dragToPan" in script.text
     assert "populateSlideMenu" in script.text

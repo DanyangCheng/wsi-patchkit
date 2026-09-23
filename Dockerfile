@@ -22,7 +22,7 @@ RUN groupadd --system --gid 10001 patchkit \
 COPY --chown=patchkit:patchkit pyproject.toml README.md LICENSE ./
 COPY --chown=patchkit:patchkit src ./src
 
-RUN python -m pip install --no-cache-dir ".[web]"
+RUN python -m pip install --no-cache-dir ".[web]" -i https://pypi.tuna.tsinghua.edu.cn/simple
 
 USER patchkit
 

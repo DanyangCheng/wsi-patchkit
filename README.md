@@ -73,14 +73,15 @@ extensions are `.svs`, `.tif`, `.tiff`, `.ndpi`, `.mrxs`, `.scn`, `.vms`,
 The slide picker shows discovered files under their relative folders; folders
 can be expanded, and search matches both folder names and slide names.
 
-The slide picker also has an **Upload slide** button. Uploaded single-file WSIs
-are validated, added to the list immediately, and opened after upload. Files are
-saved in `./uploads` by default; use `--upload-dir /path/to/uploads` to choose a
-persistent location. Uploads are limited to 32 GiB by default; set
+The slide picker also has an **Upload slide** button. Select multiple single-file
+WSIs to upload them sequentially. Each successful upload is validated and added
+to the list, and the last successful slide opens when the batch finishes.
+Files are saved in `./uploads` by default. Use `--upload-dir /path/to/uploads`
+to choose a persistent location. Uploads are limited to 32 GiB by default; set
 `--max-upload-gb N` to change the limit. The viewer can start without registered
 slides and accept its first slide through the browser. Supported upload
-extensions are `.svs`,
-`.tif`, `.tiff`, `.btf`, `.btiff`, `.ndpi`, `.qptiff`, `.scn`, and `.bif`.
+extensions are `.svs`, `.tif`, `.tiff`, `.btf`, `.btiff`, `.ndpi`, `.qptiff`,
+`.scn`, and `.bif`.
 
 Then open <http://127.0.0.1:8000>. The viewer supports mouse-wheel and pinch
 zooming, drag panning, double-click zooming, a navigator, level-0 coordinates,
