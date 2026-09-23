@@ -76,6 +76,48 @@ zooming, drag panning, double-click zooming, a navigator, level-0 coordinates,
 and an MPP-aware scale bar. TIFF files use the bundled tifffile reader; other
 formats are routed to the optional OpenSlide reader.
 
+### Docker Compose
+
+Create the slide directory, then build and start the viewer. WSI files can be
+added before or after startup:
+
+```bash
+mkdir -p data/slides data/overlays
+docker compose up --build -d
+```
+
+Open <http://127.0.0.1:8000>. Compose mounts slides and overlays read-only and
+stores generated crops in the persistent `wsi-patchkit_crops` volume. Stop the
+service with `docker compose down`; add `--volumes` only when you also want to
+delete the saved crops.
+
+The slide directory is rescanned when the browser polls the slide list (every
+5 seconds). New files appear after two scans with unchanged size and modification
+time, so copy large files under a temporary name and rename them after the copy
+finishes. Removed files disappear from the list. The viewer can start with an
+empty slide directory and will open the first slide when one appears.
+
+Host paths, the published port, and worker counts can be changed without
+editing `compose.yaml`:
+
+```bash
+WSI_SLIDES_DIR=/mnt/wsi \
+WSI_OVERLAYS_DIR=/mnt/predictions \
+PATCHKIT_PORT=8080 \
+PATCHKIT_READER_POOL_SIZE=8 \
+docker compose up --build -d
+```
+
+To run the image without Compose:
+
+```bash
+docker build -t wsi-patchkit .
+docker run --rm -p 8000:8000 \
+  -v /path/to/slides:/data/slides:ro \
+  -v patchkit-crops:/data/crops \
+  wsi-patchkit
+```
+
 Select **矩形裁剪** to place a rectangle on the slide, enter its exact level-0
 `x`, `y`, width, and height, choose a pyramid level, and save a PNG or JPEG on
 the server. Coordinates and dimensions are pixels at the selected level; crops

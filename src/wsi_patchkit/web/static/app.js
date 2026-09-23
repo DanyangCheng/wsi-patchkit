@@ -683,7 +683,41 @@
       fragment.append(row);
     }
     slideList.replaceChildren(fragment);
+    for (const button of slideList.querySelectorAll("button")) {
+      const selected = button.dataset.slideId === currentSlide?.id;
+      button.classList.toggle("selected", selected);
+      button.setAttribute("aria-current", selected ? "true" : "false");
+    }
     filterSlides();
+  }
+
+  async function refreshSlides() {
+    try {
+      const response = await fetch("/api/slides", { cache: "no-store" });
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      const records = await response.json();
+      const ids = records.map((record) => record.id);
+      const previous = [...slides.keys()];
+      if (ids.length === previous.length && ids.every((id, index) => id === previous[index])) {
+        return;
+      }
+      slides = new Map(records.map((record) => [record.id, slides.get(record.id) || record]));
+      populateSlideMenu(records);
+      if (currentSlide && !slides.has(currentSlide.id)) {
+        ++openSequence;
+        slideRequestController?.abort();
+        viewer.close();
+        currentSlide = null;
+        currentSlideLabel.textContent = "选择切片";
+      }
+      if (!currentSlide && !slideRequestController && records.length) {
+        openSlide(records[0].id);
+      } else if (!records.length) {
+        showStatus("切片列表为空");
+      }
+    } catch (error) {
+      console.warn("无法刷新切片列表", error);
+    }
   }
 
   async function initialize() {
@@ -831,10 +865,11 @@
       const response = await fetch("/api/slides");
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
       const records = await response.json();
-      if (!records.length) throw new Error("服务端没有注册切片");
       slides = new Map(records.map((record) => [record.id, record]));
       populateSlideMenu(records);
-      openSlide(records[0].id);
+      if (records.length) openSlide(records[0].id);
+      else showStatus("切片列表为空");
+      window.setInterval(refreshSlides, 5000);
     } catch (error) {
       showStatus(`无法读取切片列表：${error.message}`);
     }

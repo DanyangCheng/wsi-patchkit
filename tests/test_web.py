@@ -15,7 +15,11 @@ httpx = pytest.importorskip("httpx2")
 
 from wsi_patchkit import LevelInfo, SlideMetadata, TiffReader  # noqa: E402
 from wsi_patchkit.web import SlideRegistry, TileWorkerPool, create_app  # noqa: E402
-from wsi_patchkit.web.__main__ import discover_overlays, discover_slides  # noqa: E402
+from wsi_patchkit.web.__main__ import (  # noqa: E402
+    SlideDirectoryScanner,
+    discover_overlays,
+    discover_slides,
+)
 
 
 def _write_slide(path: Path) -> None:
@@ -68,6 +72,47 @@ def test_discover_slides_disambiguates_ids_across_directories(tmp_path: Path) ->
     slides = discover_slides([first_dir, second_dir])
 
     assert list(slides) == ["case.svs", "case.svs-2"]
+
+
+@pytest.mark.anyio
+async def test_slide_directory_hot_scan_adds_and_removes_stable_files(
+    tmp_path: Path,
+) -> None:
+    scanner = SlideDirectoryScanner([tmp_path], interval=0)
+    app = create_app({}, reader=TiffReader(), slide_scanner=scanner)
+    transport = httpx.ASGITransport(app=app)
+    async with app.router.lifespan_context(app), httpx.AsyncClient(
+        transport=transport, base_url="http://testserver"
+    ) as client:
+        assert (await client.get("/api/slides")).json() == []
+        first = tmp_path / "first.tif"
+        _write_slide(first)
+        assert (await client.get("/api/slides")).json() == []
+        assert (await client.get("/api/slides")).json() == [{"id": "first.tif"}]
+        assert (await client.get("/api/slides/first.tif")).status_code == 200
+        first.unlink()
+        assert (await client.get("/api/slides")).json() == []
+        assert (await client.get("/api/slides/first.tif")).status_code == 404
+        second = tmp_path / "second.tif"
+        _write_slide(second)
+        assert (await client.get("/api/slides")).json() == []
+        assert (await client.get("/api/slides")).json() == [{"id": "second.tif"}]
+
+
+def test_hot_scan_keeps_ids_when_a_new_file_sorts_first(tmp_path: Path) -> None:
+    original = tmp_path / "case.tif"
+    original.touch()
+    scanner = SlideDirectoryScanner([tmp_path], interval=0)
+    assert scanner.refresh() == {"case.tif": original}
+
+    nested = tmp_path / "a"
+    nested.mkdir()
+    (nested / "case.tif").touch()
+    scanner.refresh()
+    assert scanner.refresh() == {
+        "case.tif": original,
+        "a_case.tif": nested / "case.tif",
+    }
 
 
 def test_discover_overlays_uses_manifest_ids_and_source_stem_aliases(
@@ -176,7 +221,7 @@ async def test_viewer_serves_metadata_tiles_and_frontend(tmp_path: Path) -> None
     assert index.status_code == 200
     assert "WSI PatchKit Viewer" in index.text
     assert "/static/styles.css?v=9" in index.text
-    assert "/static/app.js?v=10" in index.text
+    assert "/static/app.js?v=11" in index.text
     assert script.status_code == 200
     assert "dragToPan" in script.text
     assert "populateSlideMenu" in script.text

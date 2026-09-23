@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import argparse
 import re
+import threading
+import time
 from collections.abc import Iterable, Mapping
 from pathlib import Path
 
@@ -72,6 +74,71 @@ def discover_slides(
             slides[slide_id] = path
             ids.add(slide_id)
     return slides
+
+
+class SlideDirectoryScanner:
+    """Refresh discovered slides while keeping public IDs stable."""
+
+    def __init__(
+        self,
+        directories: Iterable[str | Path],
+        explicit: Mapping[str, Path] | None = None,
+        *,
+        interval: float = 5.0,
+    ) -> None:
+        self.directories = tuple(
+            Path(value).expanduser().resolve() for value in directories
+        )
+        self.explicit = dict(explicit or {})
+        self.interval = interval
+        self._lock = threading.Lock()
+        self._last_scan = 0.0
+        self._signatures: dict[Path, tuple[int, int]] = {}
+        self._known_ids: dict[Path, str] = {}
+        self._slides: dict[str, Path] = dict(self.explicit)
+        self.refresh(force=True, initial=True)
+
+    def refresh(self, *, force: bool = False, initial: bool = False) -> dict[str, Path]:
+        with self._lock:
+            now = time.monotonic()
+            if not force and now - self._last_scan < self.interval:
+                return dict(self._slides)
+            self._last_scan = now
+            signatures: dict[Path, tuple[int, int]] = {}
+            paths: list[tuple[Path, Path]] = []
+            for directory in self.directories:
+                if not directory.is_dir():
+                    raise NotADirectoryError(directory)
+                for path in sorted(
+                    directory.rglob("*"), key=lambda p: p.as_posix().casefold()
+                ):
+                    if path.suffix.lower() not in SLIDE_EXTENSIONS:
+                        continue
+                    try:
+                        stat = path.stat()
+                        if not path.is_file():
+                            continue
+                    except OSError:
+                        continue
+                    signatures[path] = (stat.st_size, stat.st_mtime_ns)
+                    paths.append((directory, path))
+
+            slides = dict(self.explicit)
+            used = set(slides) | set(self._known_ids.values())
+            for directory, path in paths:
+                if path in self.explicit.values():
+                    continue
+                if not initial and signatures[path] != self._signatures.get(path):
+                    continue
+                slide_id = self._known_ids.get(path)
+                if slide_id is None:
+                    slide_id = _unique_slide_id(path.relative_to(directory), used)
+                    self._known_ids[path] = slide_id
+                    used.add(slide_id)
+                slides[slide_id] = path
+            self._signatures = signatures
+            self._slides = slides
+            return dict(slides)
 
 
 def discover_overlays(
@@ -195,16 +262,14 @@ def main() -> None:
     from .overlays import load_indexed_overlay_manifest
 
     explicit_slides = dict(args.slide or [])
+    directories = [*args.slide_dir, *args.slides]
     try:
-        slides = discover_slides(
-            [*args.slide_dir, *args.slides], existing=explicit_slides
-        )
+        scanner = SlideDirectoryScanner(directories, explicit_slides)
+        slides = scanner.refresh()
     except NotADirectoryError as error:
         parser.error(f"slide directory does not exist: {error}")
-    if not slides:
-        parser.error(
-            "provide at least one --slide or a --slide-dir containing WSI files"
-        )
+    if not slides and not directories:
+        parser.error("provide at least one --slide or --slide-dir")
 
     overlays: dict[str, dict[str, object]] = {}
     try:
@@ -254,6 +319,7 @@ def main() -> None:
         reader_pool_size=args.reader_pool_size,
         crop_output_dir=args.crop_output_dir,
         crop_workers=args.crop_workers,
+        slide_scanner=scanner if directories else None,
     )
     uvicorn.run(app, host=args.host, port=args.port)
 

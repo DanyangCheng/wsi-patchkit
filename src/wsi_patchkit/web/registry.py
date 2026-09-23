@@ -48,8 +48,10 @@ class SlideRegistry(Mapping[str, SlideSource]):
     def __init__(
         self,
         slides: Mapping[str, SlideSource | str | Path],
+        *,
+        allow_empty: bool = False,
     ) -> None:
-        if not slides:
+        if not slides and not allow_empty:
             raise ValueError("at least one slide must be registered")
         sources: dict[str, SlideSource] = {}
         for slide_id, source in slides.items():
@@ -58,6 +60,10 @@ class SlideRegistry(Mapping[str, SlideSource]):
                 source if isinstance(source, SlideSource) else SlideSource(source)
             )
         self._sources = sources
+
+    def replace(self, slides: Mapping[str, SlideSource | str | Path]) -> None:
+        """Publish a complete new snapshot without mutating active iterators."""
+        self._sources = SlideRegistry(slides, allow_empty=True)._sources
 
     def __getitem__(self, slide_id: str) -> SlideSource:
         return self._sources[slide_id]

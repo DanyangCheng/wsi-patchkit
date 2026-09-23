@@ -10,7 +10,10 @@ import uuid
 from collections.abc import Callable, Mapping
 from contextlib import asynccontextmanager, suppress
 from pathlib import Path
-from typing import TypeVar
+from typing import TYPE_CHECKING, TypeVar
+
+if TYPE_CHECKING:
+    from .__main__ import SlideDirectoryScanner
 
 try:
     from fastapi import FastAPI, HTTPException, Request
@@ -209,6 +212,7 @@ def create_app(
     cache_control: str = "private, max-age=3600",
     crop_output_dir: str | Path = "crops",
     crop_workers: int = 1,
+    slide_scanner: SlideDirectoryScanner | None = None,
 ) -> FastAPI:
     """Create a self-contained WSI viewer for an explicit slide registry."""
     if tile_size < 1:
@@ -217,7 +221,7 @@ def create_app(
         raise ValueError("provide reader or reader_factory, not both")
     if crop_workers < 1:
         raise ValueError("crop_workers must be positive")
-    registry = SlideRegistry(slides)
+    registry = SlideRegistry(slides, allow_empty=slide_scanner is not None)
     overlay_registry = OverlayRegistry(
         overlays,
         slide_ids=tuple(registry),
@@ -321,6 +325,11 @@ def create_app(
 
     @app.get("/api/slides", name="list_slides")
     async def list_slides() -> list[dict[str, str]]:
+        if slide_scanner is not None:
+            try:
+                registry.replace(await asyncio.to_thread(slide_scanner.refresh))
+            except (OSError, ValueError):
+                _LOGGER.exception("Unable to refresh slide directories")
         # Keep directory browsing responsive even for large collections. Reading
         # WSI metadata can be expensive, so defer it until a slide is selected.
         return [{"id": slide_id} for slide_id in registry]

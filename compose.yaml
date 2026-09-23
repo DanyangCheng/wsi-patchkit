@@ -1,0 +1,46 @@
+services:
+  viewer:
+    build:
+      context: .
+      args:
+        PYTHON_VERSION: ${PYTHON_VERSION:-3.12}
+    image: wsi-patchkit:local
+    init: true
+    restart: unless-stopped
+    ports:
+      - "${PATCHKIT_PORT:-8081}:8000"
+    volumes:
+      - type: bind
+        source: ${WSI_SLIDES_DIR:-./data/slides}
+        target: /data/slides
+        read_only: true
+      - type: bind
+        source: ${WSI_OVERLAYS_DIR:-./data/overlays}
+        target: /data/overlays
+        read_only: true
+      - type: volume
+        source: crops
+        target: /data/crops
+    command:
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8000"
+      - --slide-dir
+      - /data/slides
+      - --overlay-root
+      - /data/overlays
+      - --crop-output-dir
+      - /data/crops
+      - --reader-pool-size
+      - "${PATCHKIT_READER_POOL_SIZE:-4}"
+      - --crop-workers
+      - "${PATCHKIT_CROP_WORKERS:-1}"
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m,mode=1777
+    security_opt:
+      - no-new-privileges:true
+
+volumes:
+  crops:
