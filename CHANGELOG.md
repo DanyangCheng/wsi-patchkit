@@ -12,6 +12,11 @@
 - Added per-level reader pixel-format metadata and downstream adapter guidance.
 - Fixed aligned reads at non-integral pyramid ratios and added area-averaged RGB
   downsampling.
+- Added physically registered, partial indexed-prediction overlays with explicit
+  coverage, palettes, manifest validation, transparent IIIF tiles, and viewer
+  layer controls.
+- Added the `patchkit-web` CLI alias and `--overlay-root` discovery for
+  registered slides, including Segment's `{slide_id}` output layout.
 - Added sampling and patch-I/O benchmark tooling.
 
 ## 0.1.0 - 2026-09-15

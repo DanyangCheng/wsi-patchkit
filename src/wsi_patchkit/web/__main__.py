@@ -74,6 +74,55 @@ def discover_slides(
     return slides
 
 
+def discover_overlays(
+    directories: Iterable[str | Path],
+    *,
+    slide_ids: Iterable[str],
+    slide_id_aliases: Mapping[str, str] | None = None,
+) -> dict[str, dict[str, Path]]:
+    """Discover manifests below overlay roots for the registered slides.
+
+    Every ``prediction.json`` is loaded before it is registered, so the
+    manifest's ``slide_id`` and ``overlay_id`` -- rather than a directory name
+    -- determine its destination. ``slide_id_aliases`` permits a manifest to
+    use a unique source-file stem when the viewer's public ID includes the file
+    extension. Manifests for slides not served by this invocation are
+    deliberately ignored, allowing one shared output root to contain
+    predictions for more slides than the current viewer exposes.
+    """
+    from .overlays import load_indexed_overlay_manifest
+
+    registered = set(slide_ids)
+    aliases = dict(slide_id_aliases or {})
+    overlays: dict[str, dict[str, Path]] = {}
+    for value in directories:
+        directory = Path(value).expanduser().resolve()
+        if not directory.is_dir():
+            raise NotADirectoryError(directory)
+        manifests = sorted(
+            directory.rglob("prediction.json"),
+            key=lambda path: path.relative_to(directory).as_posix().casefold(),
+        )
+        for manifest in manifests:
+            overlay = load_indexed_overlay_manifest(manifest)
+            slide_id = (
+                overlay.slide_id
+                if overlay.slide_id in registered
+                else aliases.get(overlay.slide_id)
+            )
+            if slide_id not in registered:
+                continue
+            slide_overlays = overlays.setdefault(slide_id, {})
+            if overlay.overlay_id in slide_overlays:
+                previous = slide_overlays[overlay.overlay_id]
+                raise ValueError(
+                    f"duplicate overlay {overlay.overlay_id!r} for slide "
+                    f"{slide_id!r}: {previous} and {manifest}"
+                )
+            slide_overlays[overlay.overlay_id] = manifest
+    return overlays
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Serve the wsi-patchkit viewer")
     parser.add_argument(
@@ -91,10 +140,36 @@ def main() -> None:
         metavar="PATH",
         help="recursively register supported WSI files in a directory; repeatable",
     )
+    parser.add_argument(
+        "slides",
+        nargs="*",
+        type=Path,
+        metavar="SLIDES_DIR",
+        help="directories of WSI files (shorthand for --slide-dir)",
+    )
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", default=8000, type=int)
     parser.add_argument("--tile-size", default=256, type=int)
     parser.add_argument("--reader-pool-size", default=4, type=int)
+    parser.add_argument(
+        "--overlay",
+        action="append",
+        default=[],
+        type=Path,
+        metavar="MANIFEST.json",
+        help="register a wsi-patchkit-overlay/v1 manifest; repeatable",
+    )
+    parser.add_argument(
+        "--overlay-root",
+        action="append",
+        default=[],
+        type=Path,
+        metavar="PATH",
+        help=(
+            "recursively discover prediction.json manifests for registered slides; "
+            "repeatable"
+        ),
+    )
     parser.add_argument(
         "--crop-output-dir",
         default=Path("crops"),
@@ -117,10 +192,13 @@ def main() -> None:
         raise SystemExit("Install the viewer with: uv sync --extra web") from error
 
     from .app import create_app
+    from .overlays import load_indexed_overlay_manifest
 
     explicit_slides = dict(args.slide or [])
     try:
-        slides = discover_slides(args.slide_dir, existing=explicit_slides)
+        slides = discover_slides(
+            [*args.slide_dir, *args.slides], existing=explicit_slides
+        )
     except NotADirectoryError as error:
         parser.error(f"slide directory does not exist: {error}")
     if not slides:
@@ -128,8 +206,50 @@ def main() -> None:
             "provide at least one --slide or a --slide-dir containing WSI files"
         )
 
+    overlays: dict[str, dict[str, object]] = {}
+    try:
+        for manifest in args.overlay:
+            overlay = load_indexed_overlay_manifest(manifest)
+            slide_overlays = overlays.setdefault(overlay.slide_id, {})
+            if overlay.overlay_id in slide_overlays:
+                parser.error(
+                    f"duplicate overlay {overlay.overlay_id!r} "
+                    f"for slide {overlay.slide_id!r}"
+                )
+            slide_overlays[overlay.overlay_id] = overlay
+        slide_id: dict[str, str | None] = {}
+        for id, path in slides.items():
+            stem = path.stem
+            if stem not in slide_id:
+                slide_id[stem] = id
+            elif slide_id[stem] != id:
+                # An ambiguous source stem must not silently select a slide.
+                slide_id[stem] = None
+        manifest_slide_id_aliases = {
+            stem: id
+            for stem, id in slide_id.items()
+            if id is not None
+        }
+        discovered_overlays = discover_overlays(
+            args.overlay_root,
+            slide_ids=slides,
+            slide_id_aliases=manifest_slide_id_aliases,
+        )
+        for slide_id, slide_overlays in discovered_overlays.items():
+            registered_overlays = overlays.setdefault(slide_id, {})
+            for overlay_id, manifest in slide_overlays.items():
+                if overlay_id in registered_overlays:
+                    parser.error(
+                        f"duplicate overlay {overlay_id!r} for slide {slide_id!r}"
+                    )
+                registered_overlays[overlay_id] = manifest
+    except (FileNotFoundError, NotADirectoryError, ValueError) as error:
+        parser.error(str(error))
+
     app = create_app(
         slides,
+        overlays=overlays,
+        manifest_slide_id_aliases=manifest_slide_id_aliases,
         tile_size=args.tile_size,
         reader_pool_size=args.reader_pool_size,
         crop_output_dir=args.crop_output_dir,

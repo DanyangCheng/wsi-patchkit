@@ -15,7 +15,7 @@ httpx = pytest.importorskip("httpx2")
 
 from wsi_patchkit import LevelInfo, SlideMetadata, TiffReader  # noqa: E402
 from wsi_patchkit.web import SlideRegistry, TileWorkerPool, create_app  # noqa: E402
-from wsi_patchkit.web.__main__ import discover_slides  # noqa: E402
+from wsi_patchkit.web.__main__ import discover_overlays, discover_slides  # noqa: E402
 
 
 def _write_slide(path: Path) -> None:
@@ -68,6 +68,41 @@ def test_discover_slides_disambiguates_ids_across_directories(tmp_path: Path) ->
     slides = discover_slides([first_dir, second_dir])
 
     assert list(slides) == ["case.svs", "case.svs-2"]
+
+
+def test_discover_overlays_uses_manifest_ids_and_source_stem_aliases(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    overlay_root = tmp_path / "output"
+    matching = overlay_root / "Result-404_prediction"
+    unmatched = overlay_root / "other_prediction"
+    matching.mkdir(parents=True)
+    unmatched.mkdir()
+    (matching / "prediction.json").touch()
+    (unmatched / "prediction.json").touch()
+
+    # Loading is intentionally mocked here: discovery owns root traversal and
+    # manifest-to-slide routing; schema validation is covered in test_overlays.
+    import wsi_patchkit.web.overlays as overlay_module
+
+    class Manifest:
+        def __init__(self, slide_id: str) -> None:
+            self.slide_id = slide_id
+            self.overlay_id = "prediction"
+
+    def load_manifest(path: str | Path) -> Manifest:
+        slide_id = "Result-404" if Path(path).parent == matching else "other"
+        return Manifest(slide_id)
+
+    monkeypatch.setattr(overlay_module, "load_indexed_overlay_manifest", load_manifest)
+
+    assert discover_overlays(
+        [overlay_root],
+        slide_ids=["Result-404.svs"],
+        slide_id_aliases={"Result-404": "Result-404.svs"},
+    ) == {
+        "Result-404.svs": {"prediction": matching / "prediction.json"}
+    }
 
 
 @pytest.mark.anyio
@@ -140,7 +175,8 @@ async def test_viewer_serves_metadata_tiles_and_frontend(tmp_path: Path) -> None
     assert cached.status_code == 304
     assert index.status_code == 200
     assert "WSI PatchKit Viewer" in index.text
-    assert "/static/app.js?v=6" in index.text
+    assert "/static/styles.css?v=9" in index.text
+    assert "/static/app.js?v=10" in index.text
     assert script.status_code == 200
     assert "dragToPan" in script.text
     assert "populateSlideMenu" in script.text
@@ -148,6 +184,9 @@ async def test_viewer_serves_metadata_tiles_and_frontend(tmp_path: Path) -> None
     assert "pollCropJob" in script.text
     assert "wsi-patchkit.crop-size" in script.text
     assert "crop-level" in script.text
+    assert "loadInitiallyVisibleOverlays" in script.text
+    assert "overlayTileSource" in script.text
+    assert "makePanelMovable" in script.text
 
 
 @pytest.mark.anyio

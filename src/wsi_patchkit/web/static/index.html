@@ -4,12 +4,12 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>WSI PatchKit Viewer</title>
-    <link rel="stylesheet" href="/static/styles.css?v=4" />
+    <link rel="stylesheet" href="/static/styles.css?v=9" />
     <script
       src="https://cdn.jsdelivr.net/npm/openseadragon@5.0.1/build/openseadragon/openseadragon.min.js"
       defer
     ></script>
-    <script src="/static/app.js?v=6" defer></script>
+    <script src="/static/app.js?v=10" defer></script>
   </head>
   <body>
     <header class="toolbar">
@@ -33,6 +33,7 @@
           <span id="current-slide">选择切片</span><i aria-hidden="true">▾</i>
         </button>
         <div id="slide-menu" class="slide-menu" hidden>
+          <div class="slide-menu-title" data-panel-drag-handle>切片</div>
           <input
             id="slide-filter"
             type="search"
@@ -58,6 +59,7 @@
         />
         <button id="zoom-in" type="button" aria-label="放大">＋</button>
         <button id="home-view" type="button">全图</button>
+        <button id="overlay-tool" type="button" disabled>预测图层</button>
         <button id="crop-tool" type="button" aria-pressed="false">矩形裁剪</button>
       </div>
 
@@ -78,8 +80,15 @@
         <span id="scale-label"></span>
         <i id="scale-bar"></i>
       </div>
+      <section id="overlay-panel" class="overlay-panel" aria-label="预测图层" hidden>
+        <div class="overlay-panel-title" data-panel-drag-handle>
+          <strong>预测图层</strong>
+          <button id="overlay-close" type="button" aria-label="关闭预测图层">×</button>
+        </div>
+        <div id="overlay-list" class="overlay-list"></div>
+      </section>
       <section id="crop-panel" class="crop-panel" aria-label="矩形裁剪" hidden>
-        <div class="crop-panel-title">
+        <div class="crop-panel-title" data-panel-drag-handle>
           <strong>原生 Level 矩形裁剪</strong>
           <button id="crop-close" type="button" aria-label="关闭裁剪">×</button>
         </div>

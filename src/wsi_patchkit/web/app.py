@@ -24,6 +24,7 @@ from ..io import AutoSlideReader, SlideReader
 from ..tiles import TileRenderer, iiif_scale_factors
 from ..types import SlideMetadata
 from .crops import CropJobQueue
+from .overlays import RGBA, IndexedOverlay, OverlayRegistry, OverlayRenderer
 from .registry import SlideRegistry, SlideSource
 from .workers import TileWorkerPool
 
@@ -35,6 +36,24 @@ _STATIC_ASSETS = {
 }
 _INDEX_HTML = (_STATIC_DIR / "index.html").read_text(encoding="utf-8")
 _CROP_FILENAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,199}$")
+
+
+def _overlay_palette(
+    overlay: IndexedOverlay, style: str | None
+) -> dict[int, RGBA] | None:
+    if style is None:
+        return None
+    if len(style) != 8 * len(overlay.classes) or re.fullmatch(
+        r"[0-9a-fA-F]+", style
+    ) is None:
+        raise HTTPException(status_code=400, detail="invalid overlay palette")
+    palette: dict[int, RGBA] = {}
+    for index, item in enumerate(overlay.classes):
+        rgba = bytes.fromhex(style[index * 8 : index * 8 + 8])
+        palette[item.id] = (rgba[0], rgba[1], rgba[2], rgba[3])
+    return palette
+
+
 T = TypeVar("T")
 
 
@@ -62,7 +81,12 @@ async def _run_while_connected(
             work.cancel()
 
 
-def _public_metadata(slide_id: str, metadata: SlideMetadata) -> dict[str, object]:
+def _public_metadata(
+    slide_id: str,
+    metadata: SlideMetadata,
+    *,
+    overlays: Mapping[str, IndexedOverlay] | None = None,
+) -> dict[str, object]:
     return {
         "id": slide_id,
         "width": metadata.dimensions[0],
@@ -78,6 +102,9 @@ def _public_metadata(slide_id: str, metadata: SlideMetadata) -> dict[str, object
                 "mpp": level.mpp,
             }
             for level in metadata.levels
+        ],
+        "overlays": [
+            overlay.public_metadata() for overlay in (overlays or {}).values()
         ],
     }
 
@@ -165,6 +192,12 @@ def _crop_filename(
 def create_app(
     slides: Mapping[str, SlideSource | str | Path],
     *,
+    overlays: Mapping[
+        str,
+        Mapping[str, IndexedOverlay | str | Path],
+    ]
+    | None = None,
+    manifest_slide_id_aliases: Mapping[str, str] | None = None,
     reader: SlideReader | None = None,
     reader_factory: Callable[[], SlideReader] | None = None,
     reader_pool_size: int = 4,
@@ -185,6 +218,11 @@ def create_app(
     if crop_workers < 1:
         raise ValueError("crop_workers must be positive")
     registry = SlideRegistry(slides)
+    overlay_registry = OverlayRegistry(
+        overlays,
+        slide_ids=tuple(registry),
+        manifest_slide_id_aliases=manifest_slide_id_aliases,
+    )
     crop_directory = Path(crop_output_dir).expanduser().resolve()
     if reader is not None:
         renderer = TileRenderer(
@@ -208,16 +246,24 @@ def create_app(
         crop_directory,
         worker_count=crop_workers,
     )
+    overlay_renderer = OverlayRenderer(
+        reader_pool_size=reader_pool_size,
+        cache_size=cache_size,
+        max_output_pixels=max_output_pixels,
+    )
 
     @asynccontextmanager
     async def lifespan(_: FastAPI):
         yield
         crop_jobs.close()
+        overlay_renderer.close()
         workers.close()
         renderer.close()
 
     app = FastAPI(title="wsi-patchkit viewer", lifespan=lifespan)
     app.state.slide_registry = registry
+    app.state.overlay_registry = overlay_registry
+    app.state.overlay_renderer = overlay_renderer
     app.state.tile_renderer = renderer
     app.state.tile_workers = workers
     app.state.crop_output_dir = crop_directory
@@ -239,7 +285,22 @@ def create_app(
                 status_code=422,
                 detail="registered slide could not be opened",
             ) from error
+        for overlay in overlay_registry.for_slide(slide_id).values():
+            try:
+                overlay.validate_slide(metadata)
+            except ValueError as error:
+                raise HTTPException(
+                    status_code=422,
+                    detail="registered overlay is incompatible with its slide",
+                ) from error
         return source, metadata
+
+    def overlay_for(slide_id: str, overlay_id: str) -> IndexedOverlay:
+        source_for(slide_id)
+        try:
+            return overlay_registry.get(slide_id, overlay_id)
+        except KeyError as error:
+            raise HTTPException(status_code=404, detail="unknown overlay") from error
 
     @app.get("/", include_in_schema=False)
     async def index() -> HTMLResponse:
@@ -269,7 +330,19 @@ def create_app(
         _, metadata = await _run_while_connected(
             workers, request, metadata_for, slide_id
         )
-        return _public_metadata(slide_id, metadata)
+        return _public_metadata(
+            slide_id,
+            metadata,
+            overlays=overlay_registry.for_slide(slide_id),
+        )
+
+    @app.get("/api/slides/{slide_id}/overlays", name="list_overlays")
+    async def list_overlays(slide_id: str) -> list[dict[str, object]]:
+        source_for(slide_id)
+        return [
+            overlay.public_metadata()
+            for overlay in overlay_registry.for_slide(slide_id).values()
+        ]
 
     @app.post("/api/slides/{slide_id}/crops", name="save_crop")
     async def save_slide_crop(
@@ -371,6 +444,122 @@ def create_app(
             },
             headers={"Cache-Control": cache_control},
         )
+
+    @app.get(
+        "/iiif/3/{slide_id}/overlays/{overlay_id}/style/{style}/info.json",
+        name="styled_overlay_iiif_info",
+    )
+    @app.get(
+        "/iiif/3/{slide_id}/overlays/{overlay_id}/info.json",
+        name="overlay_iiif_info",
+    )
+    async def overlay_iiif_info(
+        slide_id: str,
+        overlay_id: str,
+        request: Request,
+        style: str | None = None,
+    ) -> JSONResponse:
+        overlay = overlay_for(slide_id, overlay_id)
+        _overlay_palette(overlay, style)
+        _, metadata = await _run_while_connected(
+            workers, request, metadata_for, slide_id
+        )
+        width, height = metadata.dimensions
+        info_url = str(request.url)
+        service_id = info_url.removesuffix("/info.json")
+        return JSONResponse(
+            {
+                "@context": "http://iiif.io/api/image/3/context.json",
+                "id": service_id,
+                "type": "ImageService3",
+                "protocol": "http://iiif.io/api/image",
+                "profile": "level0",
+                "width": width,
+                "height": height,
+                "tiles": [
+                    {
+                        "type": "Tile",
+                        "width": tile_size,
+                        "height": tile_size,
+                        "scaleFactors": list(
+                            iiif_scale_factors(metadata.dimensions, tile_size)
+                        ),
+                    }
+                ],
+                "preferredFormats": ["png"],
+                "extraFormats": ["png"],
+                "extraQualities": ["default"],
+                "extraFeatures": ["regionByPx", "sizeByW", "sizeByWh"],
+            },
+            headers={"Cache-Control": cache_control},
+        )
+
+    @app.get(
+        "/iiif/3/{slide_id}/overlays/{overlay_id}/style/{style}/{region}/{size}/"
+        "{rotation}/{quality}.{image_format}",
+        name="styled_overlay_iiif_image",
+    )
+    @app.get(
+        "/iiif/3/{slide_id}/overlays/{overlay_id}/{region}/{size}/"
+        "{rotation}/{quality}.{image_format}",
+        name="overlay_iiif_image",
+    )
+    async def overlay_iiif_image(
+        slide_id: str,
+        overlay_id: str,
+        region: str,
+        size: str,
+        rotation: str,
+        quality: str,
+        image_format: str,
+        request: Request,
+        style: str | None = None,
+    ) -> Response:
+        if rotation != "0" or quality != "default" or image_format != "png":
+            raise HTTPException(
+                status_code=400,
+                detail="overlays support only rotation 0, default quality, and PNG",
+            )
+        overlay = overlay_for(slide_id, overlay_id)
+        palette = _overlay_palette(overlay, style)
+        _, metadata = await _run_while_connected(
+            workers, request, metadata_for, slide_id
+        )
+        try:
+            parsed_region = _parse_region(region, metadata.dimensions)
+            output_size = _parse_size(size, parsed_region)
+            if output_size[0] * output_size[1] > max_output_pixels:
+                raise ValueError("requested output exceeds max_output_pixels")
+            if (
+                parsed_region[0] >= metadata.dimensions[0]
+                or parsed_region[1] >= metadata.dimensions[1]
+            ):
+                raise ValueError("region starts outside the image")
+        except ValueError as error:
+            raise HTTPException(status_code=400, detail=str(error)) from error
+        try:
+            encoded = await _run_while_connected(
+                workers,
+                request,
+                overlay_renderer.render_region,
+                overlay,
+                metadata,
+                parsed_region,
+                output_size,
+                palette,
+            )
+        except (OSError, RuntimeError, ValueError) as error:
+            _LOGGER.exception(
+                "Unable to render overlay %s for slide %s", overlay_id, slide_id
+            )
+            raise HTTPException(
+                status_code=422,
+                detail="registered overlay tile could not be rendered",
+            ) from error
+        headers = {"Cache-Control": cache_control, "ETag": encoded.etag}
+        if request.headers.get("if-none-match") == encoded.etag:
+            return Response(status_code=304, headers=headers)
+        return Response(encoded.content, media_type=encoded.media_type, headers=headers)
 
     @app.get(
         "/iiif/3/{slide_id}/{region}/{size}/{rotation}/{quality}.{image_format}",

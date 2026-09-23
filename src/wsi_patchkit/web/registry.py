@@ -12,6 +12,16 @@ from ..types import MPP, as_mpp
 _SLIDE_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
 
 
+def valid_public_id(value: str, *, name: str = "public ID") -> str:
+    """Validate an identifier that is safe to expose as one URL segment."""
+    if not isinstance(value, str) or not _SLIDE_ID.fullmatch(value):
+        raise ValueError(
+            f"{name} must use 1-128 letters, numbers, dots, dashes, "
+            "or underscores"
+        )
+    return value
+
+
 @dataclass(frozen=True, slots=True)
 class SlideSource:
     """One server-side WSI and an optional physical-resolution override."""
@@ -43,11 +53,7 @@ class SlideRegistry(Mapping[str, SlideSource]):
             raise ValueError("at least one slide must be registered")
         sources: dict[str, SlideSource] = {}
         for slide_id, source in slides.items():
-            if not _SLIDE_ID.fullmatch(slide_id):
-                raise ValueError(
-                    "slide IDs must use 1-128 letters, numbers, dots, dashes, "
-                    "or underscores"
-                )
+            valid_public_id(slide_id, name="slide IDs")
             sources[slide_id] = (
                 source if isinstance(source, SlideSource) else SlideSource(source)
             )
@@ -61,4 +67,3 @@ class SlideRegistry(Mapping[str, SlideSource]):
 
     def __len__(self) -> int:
         return len(self._sources)
-

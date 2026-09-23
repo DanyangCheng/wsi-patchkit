@@ -31,6 +31,10 @@
   const cropStatus = document.querySelector("#crop-status");
   const cropOverlay = document.querySelector("#crop-overlay");
   const cropOverlaySize = document.querySelector("#crop-overlay-size");
+  const overlayTool = document.querySelector("#overlay-tool");
+  const overlayPanel = document.querySelector("#overlay-panel");
+  const overlayClose = document.querySelector("#overlay-close");
+  const overlayList = document.querySelector("#overlay-list");
 
   let slides = new Map();
   let currentSlide = null;
@@ -39,6 +43,62 @@
   let slideRequestController = null;
   let cropActive = false;
   let cropOverlayAdded = false;
+  let overlayItems = new Map();
+
+  function makePanelMovable(panel) {
+    const handle = panel.querySelector("[data-panel-drag-handle]");
+    if (!handle) return;
+    let offsetX = 0;
+    let offsetY = 0;
+
+    const move = (event) => {
+      const width = panel.offsetWidth;
+      const height = panel.offsetHeight;
+      const left = Math.min(
+        Math.max(0, event.clientX - offsetX),
+        Math.max(0, window.innerWidth - width),
+      );
+      const top = Math.min(
+        Math.max(0, event.clientY - offsetY),
+        Math.max(0, window.innerHeight - height),
+      );
+      panel.style.left = `${left}px`;
+      panel.style.top = `${top}px`;
+    };
+
+    const end = (event) => {
+      handle.classList.remove("dragging");
+      if (handle.hasPointerCapture(event.pointerId)) {
+        handle.releasePointerCapture(event.pointerId);
+      }
+      handle.removeEventListener("pointermove", move);
+      handle.removeEventListener("pointerup", end);
+      handle.removeEventListener("pointercancel", end);
+    };
+
+    handle.addEventListener("pointerdown", (event) => {
+      if (event.button !== 0 || event.target.closest("button, input, select")) return;
+      const bounds = panel.getBoundingClientRect();
+      panel.style.position = "fixed";
+      panel.style.left = `${bounds.left}px`;
+      panel.style.top = `${bounds.top}px`;
+      panel.style.right = "auto";
+      offsetX = event.clientX - bounds.left;
+      offsetY = event.clientY - bounds.top;
+      handle.classList.add("dragging");
+      handle.setPointerCapture(event.pointerId);
+      handle.addEventListener("pointermove", move);
+      handle.addEventListener("pointerup", end);
+      handle.addEventListener("pointercancel", end);
+      event.preventDefault();
+    });
+  }
+
+  for (const panel of document.querySelectorAll(
+    ".slide-menu, .overlay-panel, .crop-panel",
+  )) {
+    makePanelMovable(panel);
+  }
 
   function loadCropSize() {
     try {
@@ -83,6 +143,185 @@
 
   function currentItem() {
     return viewer && viewer.world.getItemCount() ? viewer.world.getItemAt(0) : null;
+  }
+
+  function overlayTileSource(slideId, overlayId, style) {
+    return (
+      `/iiif/3/${encodeURIComponent(slideId)}/overlays/` +
+      `${encodeURIComponent(overlayId)}/style/${style}/info.json`
+    );
+  }
+
+  function setOverlayOpacity(overlayId, opacity) {
+    const entry = overlayItems.get(overlayId);
+    if (!entry) return;
+    entry.opacity = opacity;
+    if (entry.item) entry.item.setOpacity(opacity);
+  }
+
+  function loadOverlay(record, opacity, style) {
+    const existing = overlayItems.get(record.id);
+    if (existing?.style === style) {
+      setOverlayOpacity(record.id, opacity);
+      return;
+    }
+    const slideId = currentSlide?.id;
+    if (!slideId) return;
+    if (existing?.item) viewer.world.removeItem(existing.item);
+    const entry = { style, opacity, item: null };
+    overlayItems.set(record.id, entry);
+    viewer.addTiledImage({
+      tileSource: overlayTileSource(slideId, record.id, style),
+      opacity,
+      index: viewer.world.getItemCount(),
+      success: (event) => {
+        if (currentSlide?.id !== slideId || overlayItems.get(record.id) !== entry) {
+          viewer.world.removeItem(event.item);
+          return;
+        }
+        entry.item = event.item;
+        event.item.setOpacity(entry.opacity);
+      },
+      error: () => {
+        if (currentSlide?.id === slideId && overlayItems.get(record.id) === entry) {
+          overlayItems.delete(record.id);
+          const checkbox = overlayList.querySelector(
+            `input[data-overlay-id="${CSS.escape(record.id)}"]`,
+          );
+          if (checkbox) checkbox.checked = false;
+        }
+      },
+    });
+  }
+
+  function populateOverlayControls() {
+    overlayItems = new Map();
+    const overlays = currentSlide?.overlays || [];
+    overlayTool.disabled = overlays.length === 0;
+    if (!overlays.length) overlayPanel.hidden = true;
+    const rows = overlays.map((record) => {
+      const row = document.createElement("div");
+      row.className = "overlay-row";
+      const header = document.createElement("div");
+      header.className = "overlay-row-header";
+      const label = document.createElement("label");
+      const checkbox = document.createElement("input");
+      checkbox.type = "checkbox";
+      checkbox.checked = Boolean(record.initially_visible);
+      checkbox.dataset.overlayId = record.id;
+      label.append(checkbox, document.createTextNode(record.display_name || record.id));
+      header.append(label);
+
+      const opacityLabel = document.createElement("label");
+      opacityLabel.className = "overlay-opacity";
+      opacityLabel.append(document.createTextNode("透明度"));
+      const opacity = document.createElement("input");
+      opacity.type = "range";
+      opacity.min = "0";
+      opacity.max = "1";
+      opacity.step = "0.01";
+      opacity.value = String(record.default_opacity ?? 0.7);
+      opacityLabel.append(opacity);
+
+      const legend = document.createElement("div");
+      legend.className = "overlay-legend";
+      const classSettings = (record.classes || []).map((item) => ({
+        item,
+        color: item.rgba.slice(0, 3),
+        alpha: item.rgba[3] || 255,
+        visible: item.rgba[3] > 0,
+        checkbox: null,
+      }));
+      const styleValue = () => classSettings.map(({ color, alpha, visible }) =>
+        [...color, visible ? alpha : 0]
+          .map((channel) => channel.toString(16).padStart(2, "0"))
+          .join(""),
+      ).join("");
+      const updateOverlay = () => {
+        if (checkbox.checked) loadOverlay(record, Number(opacity.value), styleValue());
+      };
+      const classActions = document.createElement("div");
+      classActions.className = "overlay-class-actions";
+      const selectAll = document.createElement("button");
+      selectAll.type = "button";
+      selectAll.textContent = "全选";
+      selectAll.setAttribute("aria-label", `${record.display_name || record.id} 类别全选`);
+      selectAll.addEventListener("click", () => {
+        for (const setting of classSettings) {
+          setting.visible = true;
+          setting.checkbox.checked = true;
+        }
+        updateOverlay();
+      });
+      const invertSelection = document.createElement("button");
+      invertSelection.type = "button";
+      invertSelection.textContent = "反选";
+      invertSelection.setAttribute("aria-label", `${record.display_name || record.id} 类别反选`);
+      invertSelection.addEventListener("click", () => {
+        for (const setting of classSettings) {
+          setting.visible = !setting.visible;
+          setting.checkbox.checked = setting.visible;
+        }
+        updateOverlay();
+      });
+      classActions.append(selectAll, invertSelection);
+      for (const setting of classSettings) {
+        const entry = document.createElement("div");
+        entry.className = "overlay-class";
+        const classLabel = document.createElement("label");
+        const visible = document.createElement("input");
+        visible.type = "checkbox";
+        visible.checked = setting.visible;
+        setting.checkbox = visible;
+        visible.setAttribute("aria-label", `显示 ${setting.item.name}`);
+        classLabel.append(visible, document.createTextNode(setting.item.name));
+        const color = document.createElement("input");
+        color.type = "color";
+        color.value = `#${setting.color.map((channel) =>
+          channel.toString(16).padStart(2, "0"),
+        ).join("")}`;
+        color.setAttribute("aria-label", `${setting.item.name} 颜色`);
+        visible.addEventListener("change", () => {
+          setting.visible = visible.checked;
+          updateOverlay();
+        });
+        color.addEventListener("change", () => {
+          setting.color = [1, 3, 5].map((offset) =>
+            Number.parseInt(color.value.slice(offset, offset + 2), 16),
+          );
+          updateOverlay();
+        });
+        entry.append(classLabel, color);
+        legend.append(entry);
+      }
+
+      checkbox.addEventListener("change", () => {
+        const value = Number(opacity.value);
+        if (checkbox.checked) loadOverlay(record, value, styleValue());
+        else setOverlayOpacity(record.id, 0);
+      });
+      opacity.addEventListener("input", () => {
+        if (checkbox.checked) {
+          const value = Number(opacity.value);
+          loadOverlay(record, value, styleValue());
+          setOverlayOpacity(record.id, value);
+        }
+      });
+      row.append(header, opacityLabel, classActions, legend);
+      return row;
+    });
+    overlayList.replaceChildren(...rows);
+  }
+
+  function loadInitiallyVisibleOverlays() {
+    for (const record of currentSlide?.overlays || []) {
+      if (record.initially_visible) {
+        const style = (record.classes || []).map((item) =>
+          item.rgba.map((channel) => channel.toString(16).padStart(2, "0")).join(""),
+        ).join("");
+        loadOverlay(record, Number(record.default_opacity ?? 0.7), style);
+      }
+    }
   }
 
   function niceScaleLength(targetMicrometres) {
@@ -363,6 +602,7 @@
       cropOverlayAdded = false;
       cropOverlay.hidden = true;
       viewer.close();
+      overlayItems = new Map();
     }
     currentSlideLabel.textContent = slideId;
     for (const item of slideList.querySelectorAll("button")) {
@@ -387,6 +627,7 @@
       if (sequence !== openSequence) return;
       currentSlide = metadata;
       populateCropLevels();
+      populateOverlayControls();
       viewer.open(`/iiif/3/${encodeURIComponent(slideId)}/info.json`);
     } catch (error) {
       if (error.name !== "AbortError" && sequence === openSequence) {
@@ -483,6 +724,7 @@
     viewer.addHandler("open", () => {
       hideStatus();
       updateViewportStatus();
+      loadInitiallyVisibleOverlays();
       if (cropActive) initializeCropRegion();
     });
     viewer.addHandler("open-failed", (event) => {
@@ -553,6 +795,13 @@
       viewer.viewport.goHome();
     });
     cropTool.addEventListener("click", () => setCropActive(!cropActive));
+    overlayTool.addEventListener("click", () => {
+      if (!overlayTool.disabled) overlayPanel.hidden = !overlayPanel.hidden;
+    });
+    overlayClose.addEventListener("click", () => {
+      overlayPanel.hidden = true;
+      overlayTool.focus();
+    });
     cropClose.addEventListener("click", () => setCropActive(false));
     for (const input of [cropX, cropY, cropWidth, cropHeight]) {
       input.addEventListener("change", syncCropInputs);

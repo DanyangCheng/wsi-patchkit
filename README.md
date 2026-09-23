@@ -103,6 +103,59 @@ app = create_app(
 )
 ```
 
+### Indexed prediction overlays
+
+The viewer can place one or more partial indexed prediction rasters in WSI
+physical coordinates. Each overlay uses a caller-owned palette, and an optional
+binary coverage TIFF distinguishes a valid class (including class zero) from a
+region that was never predicted. See the complete
+[Segment prediction-mask contract](docs/SEGMENT_PREDICTION_MASK_CONTRACT.md).
+
+Register a manifest from the CLI:
+
+```bash
+uv run wsi-patchkit-viewer \
+  --slide case-001=/data/case-001.svs \
+  --overlay /data/case-001/prediction.json
+```
+
+For a shared downstream output directory, `patchkit-web` can discover only
+the manifests whose `slide_id` is among the served slides. This supports the
+Segment layout `/home/cdy/Projects/Segment/output/{slide_id}/`:
+
+```bash
+uv run patchkit-web /data/slides \
+  --overlay-root /home/cdy/Projects/Segment/output
+```
+
+It recursively locates `prediction.json`, then uses its declared `slide_id`
+and `overlay_id`; directory names are not treated as metadata. When slide IDs
+were discovered from filenames, a manifest may use the unique filename stem
+(for example `case-001` for `case-001.svs`). Results for unserved slides are
+ignored, while duplicate `(slide_id, overlay_id)` pairs are rejected.
+`wsi-patchkit-viewer --slide-dir /data/slides` remains supported.
+
+Or register it programmatically:
+
+```python
+from wsi_patchkit.web import create_app
+
+app = create_app(
+    {"case-001": "/data/case-001.svs"},
+    overlays={
+        "case-001": {
+            "prediction": "/data/case-001/prediction.json",
+        }
+    },
+)
+```
+
+Overlay tiles are transparent PNGs served separately from the WSI. The browser
+can toggle each layer, adjust opacity, change class colors, and show or hide
+classes individually or with Select All and Invert Selection controls.
+Patchkit never infers class semantics, background IDs, coverage, or registration
+from the mask pixels.
+
 The server exposes a conservative subset of IIIF Image API 3 at
 `/iiif/3/{slide_id}`. Paths are registered server-side and are never accepted
 from request URLs. Tiles are rendered from the closest suitable native pyramid

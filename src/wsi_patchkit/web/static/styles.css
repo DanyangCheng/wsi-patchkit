@@ -151,6 +151,13 @@ select:focus-visible {
   display: none;
 }
 
+.slide-menu-title {
+  margin: -2px 0 8px;
+  color: #7ce8cc;
+  font-size: 13px;
+  font-weight: 700;
+}
+
 #slide-filter {
   width: 100%;
   height: 36px;
@@ -315,6 +322,130 @@ main {
   background: rgb(14 19 26 / 96%);
   box-shadow: 0 18px 50px rgb(0 0 0 / 46%);
   backdrop-filter: blur(12px);
+}
+
+.overlay-panel {
+  position: absolute;
+  z-index: 30;
+  top: 18px;
+  right: 18px;
+  width: min(340px, calc(100vw - 36px));
+  max-height: calc(100% - 36px);
+  padding: 14px;
+  overflow-y: auto;
+  border: 1px solid #3a4b5e;
+  border-radius: 10px;
+  background: rgb(14 19 26 / 96%);
+  box-shadow: 0 18px 50px rgb(0 0 0 / 46%);
+  backdrop-filter: blur(12px);
+}
+
+.overlay-panel[hidden] {
+  display: none;
+}
+
+.overlay-panel-title,
+.crop-panel-title,
+.slide-menu-title,
+.overlay-row-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+[data-panel-drag-handle] {
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
+}
+
+[data-panel-drag-handle].dragging {
+  cursor: grabbing;
+}
+
+.overlay-panel-title strong {
+  color: #7ce8cc;
+  font-size: 13px;
+}
+
+#overlay-close {
+  height: 26px;
+  min-width: 26px;
+  padding: 0;
+  border-color: transparent;
+  background: transparent;
+  font-size: 19px;
+}
+
+.overlay-row {
+  margin-top: 11px;
+  padding-top: 11px;
+  border-top: 1px solid #2d3744;
+}
+
+.overlay-row-header label {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 12px;
+}
+
+.overlay-opacity {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 8px;
+  align-items: center;
+  margin-top: 9px;
+  color: #8f9daf;
+  font-size: 11px;
+}
+
+.overlay-opacity input {
+  width: 100%;
+  accent-color: #6be2c5;
+}
+
+.overlay-class-actions {
+  display: flex;
+  gap: 7px;
+  margin-top: 9px;
+}
+
+.overlay-class-actions button {
+  height: 27px;
+  min-width: 0;
+  padding: 0 9px;
+  font-size: 11px;
+}
+
+.overlay-legend {
+  display: grid;
+  gap: 7px;
+  margin-top: 9px;
+}
+
+.overlay-class {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  color: #aeb9c8;
+  font-size: 11px;
+}
+
+.overlay-class label {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.overlay-class input[type="color"] {
+  width: 38px;
+  height: 27px;
+  padding: 2px;
+  border: 1px solid #536276;
+  border-radius: 5px;
+  background: #171d26;
+  cursor: pointer;
 }
 
 .crop-panel[hidden],
