@@ -88,15 +88,21 @@ async def test_slide_directory_hot_scan_adds_and_removes_stable_files(
         first = tmp_path / "first.tif"
         _write_slide(first)
         assert (await client.get("/api/slides")).json() == []
-        assert (await client.get("/api/slides")).json() == [{"id": "first.tif"}]
+        assert (await client.get("/api/slides")).json() == [
+            {"id": "first.tif", "path": "first.tif"}
+        ]
         assert (await client.get("/api/slides/first.tif")).status_code == 200
         first.unlink()
         assert (await client.get("/api/slides")).json() == []
         assert (await client.get("/api/slides/first.tif")).status_code == 404
-        second = tmp_path / "second.tif"
+        nested = tmp_path / "group" / "nested"
+        nested.mkdir(parents=True)
+        second = nested / "second.tif"
         _write_slide(second)
         assert (await client.get("/api/slides")).json() == []
-        assert (await client.get("/api/slides")).json() == [{"id": "second.tif"}]
+        assert (await client.get("/api/slides")).json() == [
+            {"id": "group_nested_second.tif", "path": "group/nested/second.tif"}
+        ]
 
 
 def test_hot_scan_keeps_ids_when_a_new_file_sorts_first(tmp_path: Path) -> None:
@@ -220,8 +226,8 @@ async def test_viewer_serves_metadata_tiles_and_frontend(tmp_path: Path) -> None
     assert cached.status_code == 304
     assert index.status_code == 200
     assert "WSI PatchKit Viewer" in index.text
-    assert "/static/styles.css?v=9" in index.text
-    assert "/static/app.js?v=11" in index.text
+    assert "/static/styles.css?v=10" in index.text
+    assert "/static/app.js?v=12" in index.text
     assert script.status_code == 200
     assert "dragToPan" in script.text
     assert "populateSlideMenu" in script.text

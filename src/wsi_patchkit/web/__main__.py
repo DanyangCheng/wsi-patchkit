@@ -96,7 +96,13 @@ class SlideDirectoryScanner:
         self._signatures: dict[Path, tuple[int, int]] = {}
         self._known_ids: dict[Path, str] = {}
         self._slides: dict[str, Path] = dict(self.explicit)
+        self._relative_paths: dict[str, str] = {}
         self.refresh(force=True, initial=True)
+
+    def relative_paths(self) -> dict[str, str]:
+        """Return public IDs mapped to paths relative to their scan roots."""
+        with self._lock:
+            return dict(self._relative_paths)
 
     def refresh(self, *, force: bool = False, initial: bool = False) -> dict[str, Path]:
         with self._lock:
@@ -124,6 +130,7 @@ class SlideDirectoryScanner:
                     paths.append((directory, path))
 
             slides = dict(self.explicit)
+            relative_paths: dict[str, str] = {}
             used = set(slides) | set(self._known_ids.values())
             for directory, path in paths:
                 if path in self.explicit.values():
@@ -136,8 +143,10 @@ class SlideDirectoryScanner:
                     self._known_ids[path] = slide_id
                     used.add(slide_id)
                 slides[slide_id] = path
+                relative_paths[slide_id] = path.relative_to(directory).as_posix()
             self._signatures = signatures
             self._slides = slides
+            self._relative_paths = relative_paths
             return dict(slides)
 
 

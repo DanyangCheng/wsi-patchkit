@@ -189,6 +189,33 @@ select:focus-visible {
   display: none;
 }
 
+#slide-list ul {
+  margin: 0 0 0 11px;
+  padding: 0 0 0 10px;
+  border-left: 1px solid #354152;
+  list-style: none;
+}
+
+#slide-list summary {
+  overflow: hidden;
+  padding: 8px 7px;
+  border-radius: 6px;
+  color: #a9b9ca;
+  cursor: pointer;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+#slide-list summary:hover {
+  background: #202a34;
+  color: #e8edf5;
+}
+
+#slide-list summary:focus-visible {
+  outline: 2px solid #6be2c5;
+  outline-offset: -2px;
+}
+
 #slide-list button {
   width: 100%;
   overflow: hidden;

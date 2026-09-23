@@ -70,6 +70,8 @@ uv run wsi-patchkit-viewer --slide-dir /data/slides
 `--slide-dir` is repeatable and can be combined with `--slide`. Recognized file
 extensions are `.svs`, `.tif`, `.tiff`, `.ndpi`, `.mrxs`, `.scn`, `.vms`,
 `.vmu`, `.bif`, and `.qptiff`.
+The slide picker shows discovered files under their relative folders; folders
+can be expanded, and search matches both folder names and slide names.
 
 Then open <http://127.0.0.1:8000>. The viewer supports mouse-wheel and pinch
 zooming, drag panning, double-click zooming, a navigator, level-0 coordinates,

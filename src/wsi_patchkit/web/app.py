@@ -325,14 +325,22 @@ def create_app(
 
     @app.get("/api/slides", name="list_slides")
     async def list_slides() -> list[dict[str, str]]:
+        relative_paths: dict[str, str] = {}
         if slide_scanner is not None:
             try:
                 registry.replace(await asyncio.to_thread(slide_scanner.refresh))
+                relative_paths = slide_scanner.relative_paths()
             except (OSError, ValueError):
                 _LOGGER.exception("Unable to refresh slide directories")
         # Keep directory browsing responsive even for large collections. Reading
         # WSI metadata can be expensive, so defer it until a slide is selected.
-        return [{"id": slide_id} for slide_id in registry]
+        records = []
+        for slide_id in registry:
+            record = {"id": slide_id}
+            if slide_id in relative_paths:
+                record["path"] = relative_paths[slide_id]
+            records.append(record)
+        return records
 
     @app.get("/api/slides/{slide_id}", name="slide_metadata")
     async def slide_metadata(slide_id: str, request: Request) -> dict[str, object]:

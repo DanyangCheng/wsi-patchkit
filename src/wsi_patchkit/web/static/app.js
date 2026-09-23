@@ -41,6 +41,7 @@
   let viewer = null;
   let openSequence = 0;
   let slideRequestController = null;
+  const expandedFolders = new Set();
   let cropActive = false;
   let cropOverlayAdded = false;
   let overlayItems = new Map();
@@ -604,11 +605,20 @@
       viewer.close();
       overlayItems = new Map();
     }
-    currentSlideLabel.textContent = slideId;
+    currentSlideLabel.textContent = record.path || slideId;
     for (const item of slideList.querySelectorAll("button")) {
       const selected = item.dataset.slideId === slideId;
       item.classList.toggle("selected", selected);
       item.setAttribute("aria-current", selected ? "true" : "false");
+    }
+    const selectedButton = [...slideList.querySelectorAll(".slide-entry button")]
+      .find((button) => button.dataset.slideId === slideId);
+    for (let parent = selectedButton?.parentElement; parent; parent = parent.parentElement) {
+      if (parent.tagName === "DETAILS") {
+        parent.open = true;
+        expandedFolders.add(parent.dataset.folderPath);
+      }
+      if (parent === slideList) break;
     }
     closeSlideMenu();
     showStatus(`正在打开 ${slideId}…`, true);
@@ -656,10 +666,16 @@
   function filterSlides() {
     const query = slideFilter.value.trim().toLocaleLowerCase();
     let visible = 0;
-    for (const item of slideList.children) {
-      const matches = item.textContent.toLocaleLowerCase().includes(query);
+    for (const item of slideList.querySelectorAll(".slide-entry")) {
+      const matches = item.firstElementChild.dataset.search.includes(query);
       item.hidden = !matches;
       if (matches) visible += 1;
+    }
+    const folders = [...slideList.querySelectorAll(".slide-folder")].reverse();
+    for (const item of folders) {
+      item.hidden = !item.querySelector(".slide-entry:not([hidden])");
+      const details = item.firstElementChild;
+      details.open = query ? !item.hidden : expandedFolders.has(details.dataset.folderPath);
     }
     slideCount.textContent = query
       ? `${visible} / ${slides.size} 张切片`
@@ -668,22 +684,59 @@
   }
 
   function populateSlideMenu(records) {
-    const fragment = document.createDocumentFragment();
+    const root = { folders: new Map(), slides: [] };
     for (const record of records) {
-      const row = document.createElement("li");
-      row.setAttribute("role", "none");
-      const button = document.createElement("button");
-      button.type = "button";
-      button.dataset.slideId = record.id;
-      button.setAttribute("role", "menuitem");
-      button.textContent = record.id;
-      button.title = record.id;
-      button.addEventListener("click", () => openSlide(record.id));
-      row.append(button);
-      fragment.append(row);
+      const parts = (record.path || record.id).split("/");
+      let node = root;
+      for (const folder of parts.slice(0, -1)) {
+        if (!node.folders.has(folder)) {
+          node.folders.set(folder, { folders: new Map(), slides: [] });
+        }
+        node = node.folders.get(folder);
+      }
+      node.slides.push({ record, name: parts.at(-1) });
     }
-    slideList.replaceChildren(fragment);
-    for (const button of slideList.querySelectorAll("button")) {
+
+    function renderNode(node, list, prefix = "") {
+      const compare = (left, right) => left.localeCompare(right, undefined, { numeric: true });
+      for (const [name, child] of [...node.folders].sort((a, b) => compare(a[0], b[0]))) {
+        const path = prefix ? `${prefix}/${name}` : name;
+        const row = document.createElement("li");
+        row.className = "slide-folder";
+        const details = document.createElement("details");
+        details.dataset.folderPath = path;
+        details.open = expandedFolders.has(path);
+        const summary = document.createElement("summary");
+        summary.textContent = name;
+        const children = document.createElement("ul");
+        renderNode(child, children, path);
+        details.append(summary, children);
+        summary.addEventListener("click", () => {
+          if (slideFilter.value.trim()) return;
+          if (details.open) expandedFolders.delete(path);
+          else expandedFolders.add(path);
+        });
+        row.append(details);
+        list.append(row);
+      }
+      for (const { record, name } of node.slides.sort((a, b) => compare(a.name, b.name))) {
+        const row = document.createElement("li");
+        row.className = "slide-entry";
+        const button = document.createElement("button");
+        button.type = "button";
+        button.dataset.slideId = record.id;
+        button.dataset.search = `${record.id} ${record.path || ""}`.toLocaleLowerCase();
+        button.textContent = name;
+        button.title = record.path || record.id;
+        button.addEventListener("click", () => openSlide(record.id));
+        row.append(button);
+        list.append(row);
+      }
+    }
+
+    slideList.replaceChildren();
+    renderNode(root, slideList);
+    for (const button of slideList.querySelectorAll(".slide-entry button")) {
       const selected = button.dataset.slideId === currentSlide?.id;
       button.classList.toggle("selected", selected);
       button.setAttribute("aria-current", selected ? "true" : "false");
