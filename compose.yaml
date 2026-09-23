@@ -21,6 +21,9 @@ services:
       - type: volume
         source: crops
         target: /data/crops
+      - type: volume
+        source: uploads
+        target: /data/uploads
     command:
       - --host
       - 0.0.0.0
@@ -32,6 +35,8 @@ services:
       - /data/overlays
       - --crop-output-dir
       - /data/crops
+      - --upload-dir
+      - /data/uploads
       - --reader-pool-size
       - "${PATCHKIT_READER_POOL_SIZE:-4}"
       - --crop-workers
@@ -44,3 +49,4 @@ services:
 
 volumes:
   crops:
+  uploads:

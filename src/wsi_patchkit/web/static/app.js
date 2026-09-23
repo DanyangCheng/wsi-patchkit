@@ -9,6 +9,9 @@
   const slideCount = document.querySelector("#slide-count");
   const slideList = document.querySelector("#slide-list");
   const slideEmpty = document.querySelector("#slide-empty");
+  const slideUploadButton = document.querySelector("#slide-upload-button");
+  const slideUploadInput = document.querySelector("#slide-upload-input");
+  const slideUploadStatus = document.querySelector("#slide-upload-status");
   const slider = document.querySelector("#zoom-slider");
   const zoomLabel = document.querySelector("#zoom-label");
   const coordinateLabel = document.querySelector("#coordinate-label");
@@ -651,6 +654,7 @@
         });
         if (!response.ok) throw new Error(`HTTP ${response.status}`);
         metadata = await response.json();
+        metadata = { ...metadata, path: record.path };
         slides.set(slideId, metadata);
       }
       if (sequence !== openSequence) return;
@@ -763,6 +767,42 @@
     filterSlides();
   }
 
+  async function uploadSlide(file) {
+    slideUploadButton.disabled = true;
+    slideUploadStatus.textContent = "上传中 0%";
+    try {
+      const record = await new Promise((resolve, reject) => {
+        const request = new XMLHttpRequest();
+        request.open("POST", `/api/slides/upload?filename=${encodeURIComponent(file.name)}`);
+        request.responseType = "json";
+        request.setRequestHeader("Content-Type", "application/octet-stream");
+        request.upload.addEventListener("progress", (event) => {
+          if (event.lengthComputable && event.total > 0) {
+            slideUploadStatus.textContent = event.loaded === event.total
+              ? "正在验证切片…"
+              : `上传中 ${Math.round(event.loaded / event.total * 100)}%`;
+          }
+        });
+        request.addEventListener("load", () => {
+          if (request.status === 201) resolve(request.response);
+          else reject(new Error(request.response?.detail || `HTTP ${request.status}`));
+        });
+        request.addEventListener("error", () => reject(new Error("网络连接失败")));
+        request.addEventListener("abort", () => reject(new Error("上传已取消")));
+        request.send(file);
+      });
+      slides.set(record.id, record);
+      populateSlideMenu([...slides.values()]);
+      slideUploadStatus.textContent = "上传完成";
+      openSlide(record.id);
+    } catch (error) {
+      slideUploadStatus.textContent = `上传失败：${error.message}`;
+    } finally {
+      slideUploadInput.value = "";
+      slideUploadButton.disabled = false;
+    }
+  }
+
   async function refreshSlides() {
     try {
       const response = await fetch("/api/slides", { cache: "no-store" });
@@ -773,7 +813,9 @@
       if (ids.length === previous.length && ids.every((id, index) => id === previous[index])) {
         return;
       }
-      slides = new Map(records.map((record) => [record.id, slides.get(record.id) || record]));
+      slides = new Map(records.map((record) => [
+        record.id, { ...slides.get(record.id), ...record },
+      ]));
       populateSlideMenu(records);
       if (currentSlide && !slides.has(currentSlide.id)) {
         ++openSequence;
@@ -918,6 +960,11 @@
       setCropStatus("");
     });
     cropSave.addEventListener("click", saveCrop);
+    slideUploadButton.addEventListener("click", () => slideUploadInput.click());
+    slideUploadInput.addEventListener("change", () => {
+      const file = slideUploadInput.files?.[0];
+      if (file) uploadSlide(file);
+    });
     slider.addEventListener("input", () => setImageZoom(2 ** Number(slider.value)));
     menuButton.addEventListener("click", () => setSlideMenuOpen(menu.hidden));
     slideFilter.addEventListener("input", filterSlides);

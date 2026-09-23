@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Added browser slide upload with validation, immediate listing, persistent
+  server-side storage, and a dedicated Docker volume.
 - Renamed domain-level sampling APIs to `*PatchRequestSampler` and the PyTorch
   adapter argument to `request_sampler`, distinguishing them from PyTorch
   `DataLoader` samplers.

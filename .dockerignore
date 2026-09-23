@@ -12,6 +12,7 @@ htmlcov
 .coverage
 data
 crops
+uploads
 jpg
 tests
 benchmarks

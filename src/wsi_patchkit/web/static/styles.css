@@ -158,6 +158,26 @@ select:focus-visible {
   font-weight: 700;
 }
 
+.slide-upload {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  margin-bottom: 9px;
+}
+
+.slide-upload button {
+  flex: none;
+}
+
+#slide-upload-status {
+  min-width: 0;
+  overflow: hidden;
+  color: #a5f5e1;
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 #slide-filter {
   width: 100%;
   height: 36px;

@@ -73,6 +73,15 @@ extensions are `.svs`, `.tif`, `.tiff`, `.ndpi`, `.mrxs`, `.scn`, `.vms`,
 The slide picker shows discovered files under their relative folders; folders
 can be expanded, and search matches both folder names and slide names.
 
+The slide picker also has an **Upload slide** button. Uploaded single-file WSIs
+are validated, added to the list immediately, and opened after upload. Files are
+saved in `./uploads` by default; use `--upload-dir /path/to/uploads` to choose a
+persistent location. Uploads are limited to 32 GiB by default; set
+`--max-upload-gb N` to change the limit. The viewer can start without registered
+slides and accept its first slide through the browser. Supported upload
+extensions are `.svs`,
+`.tif`, `.tiff`, `.btf`, `.btiff`, `.ndpi`, `.qptiff`, `.scn`, and `.bif`.
+
 Then open <http://127.0.0.1:8000>. The viewer supports mouse-wheel and pinch
 zooming, drag panning, double-click zooming, a navigator, level-0 coordinates,
 and an MPP-aware scale bar. TIFF files use the bundled tifffile reader; other
@@ -89,9 +98,9 @@ docker compose up --build -d
 ```
 
 Open <http://127.0.0.1:8000>. Compose mounts slides and overlays read-only and
-stores generated crops in the persistent `wsi-patchkit_crops` volume. Stop the
+stores crops and browser uploads in persistent volumes. Stop the
 service with `docker compose down`; add `--volumes` only when you also want to
-delete the saved crops.
+delete saved crops and uploaded slides.
 
 The slide directory is rescanned when the browser polls the slide list (every
 5 seconds). New files appear after two scans with unchanged size and modification

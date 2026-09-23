@@ -65,7 +65,9 @@ def discover_slides(
             (
                 path
                 for path in directory.rglob("*")
-                if path.is_file() and path.suffix.lower() in SLIDE_EXTENSIONS
+                if path.is_file()
+                and not path.name.startswith(".upload-")
+                and path.suffix.lower() in SLIDE_EXTENSIONS
             ),
             key=lambda path: path.relative_to(directory).as_posix().casefold(),
         )
@@ -118,6 +120,8 @@ class SlideDirectoryScanner:
                 for path in sorted(
                     directory.rglob("*"), key=lambda p: p.as_posix().casefold()
                 ):
+                    if path.name.startswith(".upload-"):
+                        continue
                     if path.suffix.lower() not in SLIDE_EXTENSIONS:
                         continue
                     try:
@@ -254,6 +258,20 @@ def main() -> None:
         help="save level-0 rectangular crops in this server-side directory",
     )
     parser.add_argument(
+        "--upload-dir",
+        default=Path("uploads"),
+        type=Path,
+        metavar="PATH",
+        help="store browser-uploaded slides in this server-side directory",
+    )
+    parser.add_argument(
+        "--max-upload-gb",
+        default=32,
+        type=int,
+        metavar="N",
+        help="maximum browser upload size in GiB (default: 32)",
+    )
+    parser.add_argument(
         "--crop-workers",
         default=1,
         type=int,
@@ -261,6 +279,8 @@ def main() -> None:
         help="number of background crop workers (default: 1)",
     )
     args = parser.parse_args()
+    if args.max_upload_gb < 1:
+        parser.error("--max-upload-gb must be positive")
 
     try:
         import uvicorn
@@ -277,9 +297,6 @@ def main() -> None:
         slides = scanner.refresh()
     except NotADirectoryError as error:
         parser.error(f"slide directory does not exist: {error}")
-    if not slides and not directories:
-        parser.error("provide at least one --slide or --slide-dir")
-
     overlays: dict[str, dict[str, object]] = {}
     try:
         for manifest in args.overlay:
@@ -327,6 +344,8 @@ def main() -> None:
         tile_size=args.tile_size,
         reader_pool_size=args.reader_pool_size,
         crop_output_dir=args.crop_output_dir,
+        upload_dir=args.upload_dir,
+        max_upload_bytes=args.max_upload_gb * 1024**3,
         crop_workers=args.crop_workers,
         slide_scanner=scanner if directories else None,
     )

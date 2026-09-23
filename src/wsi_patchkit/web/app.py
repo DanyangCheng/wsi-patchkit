@@ -5,7 +5,9 @@ from __future__ import annotations
 import asyncio
 import logging
 import math
+import os
 import re
+import tempfile
 import uuid
 from collections.abc import Callable, Mapping
 from contextlib import asynccontextmanager, suppress
@@ -28,7 +30,7 @@ from ..tiles import TileRenderer, iiif_scale_factors
 from ..types import SlideMetadata
 from .crops import CropJobQueue
 from .overlays import RGBA, IndexedOverlay, OverlayRegistry, OverlayRenderer
-from .registry import SlideRegistry, SlideSource
+from .registry import SlideRegistry, SlideSource, valid_public_id
 from .workers import TileWorkerPool
 
 _STATIC_DIR = Path(__file__).with_name("static")
@@ -39,6 +41,20 @@ _STATIC_ASSETS = {
 }
 _INDEX_HTML = (_STATIC_DIR / "index.html").read_text(encoding="utf-8")
 _CROP_FILENAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,199}$")
+_UPLOAD_EXTENSIONS = frozenset(
+    {".bif", ".btf", ".btiff", ".ndpi", ".qptiff", ".scn", ".svs", ".tif", ".tiff"}
+)
+
+
+def _upload_name(filename: str) -> str:
+    if not filename or filename != Path(filename).name or "\\" in filename:
+        raise ValueError("filename must be a file name without directories")
+    suffix = Path(filename).suffix.lower()
+    if suffix not in _UPLOAD_EXTENSIONS:
+        raise ValueError("unsupported slide file extension")
+    stem = re.sub(r"[^A-Za-z0-9._-]+", "_", Path(filename).stem)
+    stem = stem.strip("._-")[: 128 - len(suffix) - len("upload_")]
+    return f"{stem or 'slide'}{suffix}"
 
 
 def _overlay_palette(
@@ -213,6 +229,8 @@ def create_app(
     crop_output_dir: str | Path = "crops",
     crop_workers: int = 1,
     slide_scanner: SlideDirectoryScanner | None = None,
+    upload_dir: str | Path = "uploads",
+    max_upload_bytes: int = 32 * 1024**3,
 ) -> FastAPI:
     """Create a self-contained WSI viewer for an explicit slide registry."""
     if tile_size < 1:
@@ -221,7 +239,32 @@ def create_app(
         raise ValueError("provide reader or reader_factory, not both")
     if crop_workers < 1:
         raise ValueError("crop_workers must be positive")
-    registry = SlideRegistry(slides, allow_empty=slide_scanner is not None)
+    if max_upload_bytes < 1:
+        raise ValueError("max_upload_bytes must be positive")
+    upload_directory = Path(upload_dir).expanduser().resolve()
+    if upload_directory.exists() and not upload_directory.is_dir():
+        raise NotADirectoryError(upload_directory)
+    initial_slides = dict(slides)
+    uploaded_sources: dict[str, SlideSource] = {}
+    for path in sorted(upload_directory.iterdir()) if upload_directory.is_dir() else ():
+        if (
+            path.name.startswith(".upload-")
+            or not path.is_file()
+            or path.suffix.lower() not in _UPLOAD_EXTENSIONS
+        ):
+            continue
+        slide_id = f"upload_{path.name}"
+        if slide_id in initial_slides:
+            continue
+        try:
+            valid_public_id(slide_id, name="uploaded slide ID")
+            uploaded_sources[slide_id] = SlideSource(path)
+        except (OSError, ValueError):
+            _LOGGER.warning("Skipping invalid uploaded slide %s", path)
+    registry = SlideRegistry(
+        {**initial_slides, **uploaded_sources}, allow_empty=True
+    )
+    upload_lock = asyncio.Lock()
     overlay_registry = OverlayRegistry(
         overlays,
         slide_ids=tuple(registry),
@@ -272,6 +315,17 @@ def create_app(
     app.state.tile_workers = workers
     app.state.crop_output_dir = crop_directory
     app.state.crop_jobs = crop_jobs
+    app.state.upload_dir = upload_directory
+
+    def publish_slides(scanned: Mapping[str, SlideSource | str | Path]) -> None:
+        uploaded_paths = {source.path for source in uploaded_sources.values()}
+        merged = {}
+        for slide_id, source in scanned.items():
+            path = source.path if isinstance(source, SlideSource) else source
+            if Path(path).resolve() not in uploaded_paths:
+                merged[slide_id] = source
+        merged.update(uploaded_sources)
+        registry.replace(merged)
 
     def source_for(slide_id: str) -> SlideSource:
         try:
@@ -298,6 +352,12 @@ def create_app(
                     detail="registered overlay is incompatible with its slide",
                 ) from error
         return source, metadata
+
+    def validate_uploaded_slide(path: Path) -> None:
+        metadata = renderer.metadata(path)
+        width = min(16, metadata.dimensions[0])
+        height = min(16, metadata.dimensions[1])
+        renderer.render_region(path, (0, 0, width, height), (width, height))
 
     def overlay_for(slide_id: str, overlay_id: str) -> IndexedOverlay:
         source_for(slide_id)
@@ -328,7 +388,7 @@ def create_app(
         relative_paths: dict[str, str] = {}
         if slide_scanner is not None:
             try:
-                registry.replace(await asyncio.to_thread(slide_scanner.refresh))
+                publish_slides(await workers.run(slide_scanner.refresh))
                 relative_paths = slide_scanner.relative_paths()
             except (OSError, ValueError):
                 _LOGGER.exception("Unable to refresh slide directories")
@@ -337,10 +397,75 @@ def create_app(
         records = []
         for slide_id in registry:
             record = {"id": slide_id}
-            if slide_id in relative_paths:
+            if slide_id in uploaded_sources:
+                record["path"] = f"上传切片/{uploaded_sources[slide_id].path.name}"
+            elif slide_id in relative_paths:
                 record["path"] = relative_paths[slide_id]
             records.append(record)
         return records
+
+    @app.post("/api/slides/upload", name="upload_slide", status_code=201)
+    async def upload_slide(request: Request, filename: str) -> dict[str, str]:
+        try:
+            safe_name = _upload_name(filename)
+        except ValueError as error:
+            raise HTTPException(status_code=400, detail=str(error)) from error
+        content_length = request.headers.get("content-length")
+        if (
+            content_length
+            and content_length.isdecimal()
+            and int(content_length) > max_upload_bytes
+        ):
+            raise HTTPException(status_code=413, detail="slide upload is too large")
+        upload_directory.mkdir(parents=True, exist_ok=True)
+        descriptor, temporary_name = tempfile.mkstemp(
+            prefix=".upload-", suffix=Path(safe_name).suffix,
+            dir=upload_directory,
+        )
+        temporary_path = Path(temporary_name)
+        try:
+            size = 0
+            with os.fdopen(descriptor, "wb") as output:
+                async for chunk in request.stream():
+                    if not chunk:
+                        continue
+                    size += len(chunk)
+                    if size > max_upload_bytes:
+                        raise HTTPException(
+                            status_code=413, detail="slide upload is too large"
+                        )
+                    output.write(chunk)
+            if not size:
+                raise HTTPException(status_code=400, detail="slide upload is empty")
+            try:
+                await workers.run(validate_uploaded_slide, temporary_path)
+            except (ImportError, OSError, RuntimeError, ValueError) as error:
+                raise HTTPException(
+                    status_code=422, detail="uploaded slide could not be opened"
+                ) from error
+
+            async with upload_lock:
+                stem, suffix = Path(safe_name).stem, Path(safe_name).suffix
+                candidate = safe_name
+                number = 2
+                while (
+                    (upload_directory / candidate).exists()
+                    or f"upload_{candidate}" in registry
+                ):
+                    tail = f"-{number}"
+                    max_stem = 128 - len(suffix) - len("upload_") - len(tail)
+                    candidate = f"{stem[:max_stem]}{tail}{suffix}"
+                    number += 1
+                destination = upload_directory / candidate
+                os.replace(temporary_path, destination)
+                slide_id = f"upload_{candidate}"
+                uploaded_sources[slide_id] = SlideSource(destination)
+                registry.replace(
+                    {**dict(registry), slide_id: uploaded_sources[slide_id]}
+                )
+            return {"id": slide_id, "path": f"上传切片/{candidate}"}
+        finally:
+            temporary_path.unlink(missing_ok=True)
 
     @app.get("/api/slides/{slide_id}", name="slide_metadata")
     async def slide_metadata(slide_id: str, request: Request) -> dict[str, object]:

@@ -9,5 +9,6 @@ __pycache__/
 .coverage
 htmlcov/
 crops/
+uploads/
 data/
 jpg/

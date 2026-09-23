@@ -105,6 +105,142 @@ async def test_slide_directory_hot_scan_adds_and_removes_stable_files(
         ]
 
 
+@pytest.mark.anyio
+async def test_upload_slide_is_available_immediately_and_after_restart(
+    tmp_path: Path,
+) -> None:
+    source = tmp_path / "source.tif"
+    _write_slide(source)
+    uploads = tmp_path / "uploads"
+    app = create_app({}, reader=TiffReader(), upload_dir=uploads)
+    transport = httpx.ASGITransport(app=app)
+    async with app.router.lifespan_context(app), httpx.AsyncClient(
+        transport=transport, base_url="http://testserver"
+    ) as client:
+        first = await client.post(
+            "/api/slides/upload", params={"filename": "case 1.tif"},
+            content=source.read_bytes(),
+        )
+        second = await client.post(
+            "/api/slides/upload", params={"filename": "case 1.tif"},
+            content=source.read_bytes(),
+        )
+        slides = await client.get("/api/slides")
+        metadata = await client.get("/api/slides/upload_case_1.tif")
+        tile = await client.get(
+            "/iiif/3/upload_case_1.tif/full/max/0/default.jpg"
+        )
+
+    assert first.status_code == 201
+    assert first.json() == {"id": "upload_case_1.tif", "path": "上传切片/case_1.tif"}
+    assert second.status_code == 201
+    assert second.json()["id"] == "upload_case_1-2.tif"
+    assert [item["id"] for item in slides.json()] == [
+        "upload_case_1.tif", "upload_case_1-2.tif"
+    ]
+    assert metadata.status_code == 200
+    assert metadata.json()["width"] == 20
+    assert tile.status_code == 200
+
+    restarted = create_app({}, reader=TiffReader(), upload_dir=uploads)
+    transport = httpx.ASGITransport(app=restarted)
+    async with restarted.router.lifespan_context(restarted), httpx.AsyncClient(
+        transport=transport, base_url="http://testserver"
+    ) as client:
+        assert {item["id"] for item in (await client.get("/api/slides")).json()} == {
+            "upload_case_1-2.tif", "upload_case_1.tif"
+        }
+
+
+@pytest.mark.anyio
+async def test_upload_remains_registered_after_directory_refresh(
+    tmp_path: Path,
+) -> None:
+    slide_directory = tmp_path / "slides"
+    slide_directory.mkdir()
+    original = slide_directory / "existing.tif"
+    _write_slide(original)
+    scanner = SlideDirectoryScanner([tmp_path], interval=0)
+    app = create_app(
+        scanner.refresh(), reader=TiffReader(), slide_scanner=scanner,
+        upload_dir=tmp_path / "uploads",
+    )
+    transport = httpx.ASGITransport(app=app)
+    async with app.router.lifespan_context(app), httpx.AsyncClient(
+        transport=transport, base_url="http://testserver"
+    ) as client:
+        uploaded = await client.post(
+            "/api/slides/upload", params={"filename": "new.tif"},
+            content=original.read_bytes(),
+        )
+        assert uploaded.status_code == 201
+        for _ in range(2):
+            records = (await client.get("/api/slides")).json()
+            assert {record["id"] for record in records} == {
+                "slides_existing.tif", "upload_new.tif"
+            }
+
+
+@pytest.mark.anyio
+async def test_upload_rejects_invalid_files_and_cleans_up(tmp_path: Path) -> None:
+    uploads = tmp_path / "uploads"
+    sixteen_bit = tmp_path / "sixteen.tif"
+    tifffile.imwrite(sixteen_bit, np.ones((4, 4), dtype=np.uint16))
+    app = create_app(
+        {}, reader=TiffReader(), upload_dir=uploads, max_upload_bytes=10000
+    )
+    async def oversized_chunks():
+        yield b"x" * 5000
+        yield b"x" * 5001
+
+    transport = httpx.ASGITransport(app=app)
+    async with app.router.lifespan_context(app), httpx.AsyncClient(
+        transport=transport, base_url="http://testserver"
+    ) as client:
+        unsafe = await client.post(
+            "/api/slides/upload", params={"filename": "../slide.tif"}, content=b"x"
+        )
+        unsupported = await client.post(
+            "/api/slides/upload", params={"filename": "notes.txt"}, content=b"x"
+        )
+        oversized = await client.post(
+            "/api/slides/upload", params={"filename": "big.tif"},
+            content=b"x" * 10001,
+        )
+        streamed_oversized = await client.post(
+            "/api/slides/upload", params={"filename": "streamed.tif"},
+            content=oversized_chunks(),
+        )
+        empty = await client.post(
+            "/api/slides/upload", params={"filename": "empty.tif"}, content=b""
+        )
+        invalid = await client.post(
+            "/api/slides/upload", params={"filename": "invalid.tif"},
+            content=b"not a tiff",
+        )
+        unsupported_pixels = await client.post(
+            "/api/slides/upload", params={"filename": "sixteen.tif"},
+            content=sixteen_bit.read_bytes(),
+        )
+        assert (await client.get("/api/slides")).json() == []
+        assert not list(uploads.iterdir())
+        valid = tmp_path / "valid.tif"
+        _write_slide(valid)
+        retried = await client.post(
+            "/api/slides/upload", params={"filename": "sixteen.tif"},
+            content=valid.read_bytes(),
+        )
+    assert unsafe.status_code == 400
+    assert unsupported.status_code == 400
+    assert oversized.status_code == 413
+    assert streamed_oversized.status_code == 413
+    assert empty.status_code == 400
+    assert invalid.status_code == 422
+    assert unsupported_pixels.status_code == 422
+    assert retried.status_code == 201
+    assert [path.name for path in uploads.iterdir()] == ["sixteen.tif"]
+
+
 def test_hot_scan_keeps_ids_when_a_new_file_sorts_first(tmp_path: Path) -> None:
     original = tmp_path / "case.tif"
     original.touch()
@@ -226,8 +362,8 @@ async def test_viewer_serves_metadata_tiles_and_frontend(tmp_path: Path) -> None
     assert cached.status_code == 304
     assert index.status_code == 200
     assert "WSI PatchKit Viewer" in index.text
-    assert "/static/styles.css?v=11" in index.text
-    assert "/static/app.js?v=13" in index.text
+    assert "/static/styles.css?v=12" in index.text
+    assert "/static/app.js?v=14" in index.text
     assert script.status_code == 200
     assert "dragToPan" in script.text
     assert "populateSlideMenu" in script.text
