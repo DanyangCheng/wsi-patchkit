@@ -288,6 +288,7 @@ def create_app(
         )
     worker_count = reader_pool_size if tile_workers is None else tile_workers
     workers = TileWorkerPool(worker_count)
+    overlay_workers = TileWorkerPool(max(1, worker_count // 2))
     crop_jobs = CropJobQueue(
         renderer,
         crop_directory,
@@ -303,6 +304,7 @@ def create_app(
     async def lifespan(_: FastAPI):
         yield
         crop_jobs.close()
+        overlay_workers.close()
         overlay_renderer.close()
         workers.close()
         renderer.close()
@@ -313,6 +315,7 @@ def create_app(
     app.state.overlay_renderer = overlay_renderer
     app.state.tile_renderer = renderer
     app.state.tile_workers = workers
+    app.state.overlay_workers = overlay_workers
     app.state.crop_output_dir = crop_directory
     app.state.crop_jobs = crop_jobs
     app.state.upload_dir = upload_directory
@@ -588,6 +591,10 @@ def create_app(
         )
 
     @app.get(
+        "/iiif/3/{slide_id}/overlays/{overlay_id}/revision/{revision}/style/{style}/info.json",
+        name="versioned_styled_overlay_iiif_info",
+    )
+    @app.get(
         "/iiif/3/{slide_id}/overlays/{overlay_id}/style/{style}/info.json",
         name="styled_overlay_iiif_info",
     )
@@ -600,8 +607,11 @@ def create_app(
         overlay_id: str,
         request: Request,
         style: str | None = None,
+        revision: str | None = None,
     ) -> JSONResponse:
         overlay = overlay_for(slide_id, overlay_id)
+        if revision is not None and revision != overlay.cache_token:
+            raise HTTPException(status_code=404, detail="unknown overlay revision")
         _overlay_palette(overlay, style)
         _, metadata = await _run_while_connected(
             workers, request, metadata_for, slide_id
@@ -637,6 +647,11 @@ def create_app(
         )
 
     @app.get(
+        "/iiif/3/{slide_id}/overlays/{overlay_id}/revision/{revision}/style/{style}/{region}/{size}/"
+        "{rotation}/{quality}.{image_format}",
+        name="versioned_styled_overlay_iiif_image",
+    )
+    @app.get(
         "/iiif/3/{slide_id}/overlays/{overlay_id}/style/{style}/{region}/{size}/"
         "{rotation}/{quality}.{image_format}",
         name="styled_overlay_iiif_image",
@@ -656,6 +671,7 @@ def create_app(
         image_format: str,
         request: Request,
         style: str | None = None,
+        revision: str | None = None,
     ) -> Response:
         if rotation != "0" or quality != "default" or image_format != "png":
             raise HTTPException(
@@ -663,6 +679,8 @@ def create_app(
                 detail="overlays support only rotation 0, default quality, and PNG",
             )
         overlay = overlay_for(slide_id, overlay_id)
+        if revision is not None and revision != overlay.cache_token:
+            raise HTTPException(status_code=404, detail="unknown overlay revision")
         palette = _overlay_palette(overlay, style)
         _, metadata = await _run_while_connected(
             workers, request, metadata_for, slide_id
@@ -681,7 +699,7 @@ def create_app(
             raise HTTPException(status_code=400, detail=str(error)) from error
         try:
             encoded = await _run_while_connected(
-                workers,
+                overlay_workers,
                 request,
                 overlay_renderer.render_region,
                 overlay,

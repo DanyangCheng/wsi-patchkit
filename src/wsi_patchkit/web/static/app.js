@@ -150,10 +150,11 @@
     return viewer && viewer.world.getItemCount() ? viewer.world.getItemAt(0) : null;
   }
 
-  function overlayTileSource(slideId, overlayId, style) {
+  function overlayTileSource(slideId, overlayId, revision, style) {
     return (
       `/iiif/3/${encodeURIComponent(slideId)}/overlays/` +
-      `${encodeURIComponent(overlayId)}/style/${style}/info.json`
+      `${encodeURIComponent(overlayId)}/revision/${encodeURIComponent(revision)}/` +
+      `style/${style}/info.json`
     );
   }
 
@@ -176,7 +177,7 @@
     const entry = { style, opacity, item: null };
     overlayItems.set(record.id, entry);
     viewer.addTiledImage({
-      tileSource: overlayTileSource(slideId, record.id, style),
+      tileSource: overlayTileSource(slideId, record.id, record.revision, style),
       opacity,
       index: viewer.world.getItemCount(),
       success: (event) => {
@@ -912,12 +913,15 @@
       showStatus(`切片加载失败：${event.message || "未知错误"}`);
     });
     viewer.addHandler("viewport-change", updateViewportStatus);
-    viewer.addHandler("canvas-hover", (event) => {
+    const updatePointerCoordinates = (event) => {
       const item = currentItem();
-      if (!item || !event.position) return;
-      const viewportPoint = viewer.viewport.pointFromPixel(event.position);
-      const imagePoint = item.viewportToImageCoordinates(viewportPoint);
+      if (!item || !currentSlide) return;
+      const imagePoint = item.windowToImageCoordinates(
+        new OpenSeadragon.Point(event.clientX, event.clientY),
+      );
       const inBounds =
+        Number.isFinite(imagePoint.x) &&
+        Number.isFinite(imagePoint.y) &&
         imagePoint.x >= 0 &&
         imagePoint.y >= 0 &&
         imagePoint.x < currentSlide.width &&
@@ -925,6 +929,23 @@
       coordinateLabel.textContent = inBounds
         ? `x ${Math.floor(imagePoint.x).toLocaleString()} · y ${Math.floor(imagePoint.y).toLocaleString()}`
         : "x — · y —";
+    };
+    let pointerFrame = 0;
+    let pointerPosition = null;
+    viewer.element.addEventListener("pointermove", (event) => {
+      pointerPosition = { clientX: event.clientX, clientY: event.clientY };
+      if (pointerFrame) return;
+      pointerFrame = requestAnimationFrame(() => {
+        pointerFrame = 0;
+        updatePointerCoordinates(pointerPosition);
+      });
+    });
+    viewer.element.addEventListener("pointerdown", updatePointerCoordinates);
+    viewer.element.addEventListener("pointerleave", () => {
+      if (pointerFrame) cancelAnimationFrame(pointerFrame);
+      pointerFrame = 0;
+      pointerPosition = null;
+      coordinateLabel.textContent = "x — · y —";
     });
     viewer.addHandler("canvas-click", (event) => {
       if (!cropActive || !event.quick || !event.position) return;

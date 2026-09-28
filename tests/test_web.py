@@ -367,8 +367,8 @@ async def test_viewer_serves_metadata_tiles_and_frontend(tmp_path: Path) -> None
     assert cached.status_code == 304
     assert index.status_code == 200
     assert "WSI PatchKit Viewer" in index.text
-    assert "/static/styles.css?v=12" in index.text
-    assert "/static/app.js?v=15" in index.text
+    assert "/static/styles.css?v=13" in index.text
+    assert "/static/app.js?v=17" in index.text
     assert script.status_code == 200
     assert "dragToPan" in script.text
     assert "populateSlideMenu" in script.text

@@ -228,6 +228,22 @@ class IndexedOverlay:
     def revision(self) -> tuple[str, ...]:
         return tuple(fragment.revision for fragment in self.fragments)
 
+    @property
+    def cache_token(self) -> str:
+        """Change the tile URL when a fragment is replaced in place."""
+        fingerprint: list[object] = [
+            self.slide_id,
+            self.overlay_id,
+            tuple((item.id, item.rgba) for item in self.classes),
+        ]
+        for fragment in self.fragments:
+            fingerprint.extend((fragment.revision, fragment.geometry))
+            for source in (fragment.source, fragment.coverage):
+                if source is not None:
+                    stat = Path(source.path).stat()
+                    fingerprint.extend((str(source.path), stat.st_size, stat.st_mtime_ns))
+        return hashlib.sha256(repr(fingerprint).encode("utf-8")).hexdigest()[:16]
+
     def public_metadata(self) -> dict[str, object]:
         return {
             "id": self.overlay_id,
@@ -235,6 +251,7 @@ class IndexedOverlay:
             "encoding": "indexed",
             "default_opacity": self.default_opacity,
             "initially_visible": self.initially_visible,
+            "revision": self.cache_token,
             "classes": [
                 {"id": item.id, "name": item.name, "rgba": list(item.rgba)}
                 for item in self.classes
@@ -564,15 +581,8 @@ class OverlayRenderer:
                     / output_height
                     / fragment.geometry.mpp[1],
                 )
-                sampled = self._read_sampled(
-                    reader,
-                    fragment.source.path,
-                    source_x,
-                    source_y,
-                    requested_downsample,
-                ).astype(np.int64, copy=False)
                 if fragment.coverage is None:
-                    coverage = np.ones(sampled.shape, dtype=bool)
+                    coverage = None
                 else:
                     raw_coverage = self._read_sampled(
                         reader,
@@ -588,10 +598,19 @@ class OverlayRenderer:
                             f"coverage TIFF contains values outside 0/1: {values}"
                         )
                     coverage = raw_coverage.astype(bool, copy=False)
+                    if not np.any(coverage):
+                        continue
+                sampled = self._read_sampled(
+                    reader,
+                    fragment.source.path,
+                    source_x,
+                    source_y,
+                    requested_downsample,
+                ).astype(np.int64, copy=False)
                 safe = np.minimum(sampled, max_id)
-                invalid_ids = coverage & (
-                    (sampled > max_id) | ~known[safe]
-                )
+                invalid_ids = (sampled > max_id) | ~known[safe]
+                if coverage is not None:
+                    invalid_ids &= coverage
                 if np.any(invalid_ids):
                     values = np.unique(sampled[invalid_ids]).tolist()
                     raise ValueError(
@@ -599,7 +618,8 @@ class OverlayRenderer:
                     )
                 colored = palette[safe]
                 colored = colored.copy()
-                colored[~coverage, 3] = 0
+                if coverage is not None:
+                    colored[~coverage, 3] = 0
                 result[np.ix_(output_y, output_x)] = colored
         return result
 

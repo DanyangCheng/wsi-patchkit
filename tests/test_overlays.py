@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 from io import BytesIO
 from pathlib import Path
 
@@ -165,6 +166,16 @@ def test_manifest_loads_indexed_fragment_and_rejects_escaping_paths(
         load_indexed_overlay_manifest(manifest)
 
 
+def test_overlay_cache_token_changes_when_prediction_is_replaced(tmp_path: Path) -> None:
+    overlay = _overlay(tmp_path)
+    before = overlay.public_metadata()["revision"]
+    prediction = overlay.fragments[0].source.path
+    stat = prediction.stat()
+    os.utime(prediction, ns=(stat.st_atime_ns, stat.st_mtime_ns + 1_000_000_000))
+
+    assert overlay.public_metadata()["revision"] != before
+
+
 def test_manifest_requires_exactly_one_coverage_declaration(tmp_path: Path) -> None:
     _overlay(tmp_path)
     payload = {
@@ -220,6 +231,33 @@ def test_renderer_places_partial_prediction_and_applies_coverage(
     np.testing.assert_array_equal(rgba[2, 4], np.array([0, 255, 0, 200]))
     assert rgba[3, 3, 3] == 0  # Prediction ID 9 is ignored outside coverage.
     assert not rgba[5:, :, 3].any()
+
+
+def test_empty_coverage_skips_prediction_read(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    overlay = _overlay(tmp_path, coverage=np.zeros((3, 4), dtype=np.uint8))
+    metadata = SlideMetadata(
+        tmp_path / "slide.tif",
+        (LevelInfo(0, (8, 8), (1, 1), (0.5, 0.5)),),
+        mpp=(0.5, 0.5),
+    )
+    renderer = OverlayRenderer(reader_pool_size=1)
+    sampled_paths: list[Path] = []
+    original = renderer._read_sampled
+
+    def track_read(reader, path, source_x, source_y, requested_downsample):
+        sampled_paths.append(Path(path))
+        return original(reader, path, source_x, source_y, requested_downsample)
+
+    monkeypatch.setattr(renderer, "_read_sampled", track_read)
+    try:
+        encoded = renderer.render_region(overlay, metadata, (0, 0, 8, 8), (8, 8))
+    finally:
+        renderer.close()
+
+    assert sampled_paths == [overlay.fragments[0].coverage.path]
+    assert not np.asarray(Image.open(BytesIO(encoded.content))).any()
 
 
 def test_renderer_rejects_invalid_coverage_and_unknown_valid_ids(
@@ -326,6 +364,8 @@ async def test_viewer_serves_registered_overlay_metadata_and_tiles(
     assert metadata.json()["overlays"][0]["id"] == "prediction"
     assert overlays.status_code == 200
     assert overlays.json()[0]["classes"][1]["name"] == "G3"
+    revision = overlays.json()[0]["revision"]
+    assert len(revision) == 16
     assert info.status_code == 200
     assert info.json()["width"] == 8
     assert info.json()["preferredFormats"] == ["png"]
@@ -353,7 +393,10 @@ async def test_viewer_applies_class_palette_and_visibility_from_style_url(
         tile_size=4,
     )
     style = "00000000" "123456a0" "00ff0000"
-    prefix = f"/iiif/3/case-001/overlays/prediction/style/{style}"
+    revision = overlay.cache_token
+    prefix = (
+        f"/iiif/3/case-001/overlays/prediction/revision/{revision}/style/{style}"
+    )
     transport = httpx.ASGITransport(app=app)
     async with app.router.lifespan_context(app), httpx.AsyncClient(
         transport=transport,
@@ -368,6 +411,9 @@ async def test_viewer_applies_class_palette_and_visibility_from_style_url(
         invalid = await client.get(
             "/iiif/3/case-001/overlays/prediction/style/abc/info.json"
         )
+        stale = await client.get(
+            f"/iiif/3/case-001/overlays/prediction/revision/deadbeef/style/{style}/info.json"
+        )
 
     assert info.status_code == 200
     assert info.json()["id"].endswith(prefix)
@@ -376,3 +422,4 @@ async def test_viewer_applies_class_palette_and_visibility_from_style_url(
     np.testing.assert_array_equal(pixels[5, 5], [0x12, 0x34, 0x56, 0xA0])
     assert np.asarray(Image.open(BytesIO(hidden.content)))[5, 5, 3] == 0
     assert invalid.status_code == 400
+    assert stale.status_code == 404

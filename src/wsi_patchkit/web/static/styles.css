@@ -635,9 +635,14 @@ button.primary,
   }
 
   .brand small,
-  .status-group,
   .help {
     display: none;
+  }
+
+  .status-group {
+    order: 4;
+    width: 100%;
+    margin-left: 0;
   }
 
   .slide-picker {
