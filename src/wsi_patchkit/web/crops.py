@@ -118,6 +118,17 @@ class CropJobQueue:
                 raise KeyError(job_id)
             return job.public()
 
+    def delete_saved_crops(self, filenames: list[str]) -> None:
+        """Delete saved crops unless a queued job currently owns a filename."""
+        with self._lock:
+            if any(filename in self._reserved_filenames for filename in filenames):
+                raise RuntimeError("crop is still being rendered")
+            paths = [self._output_dir / filename for filename in filenames]
+            if any(path.is_symlink() or not path.is_file() for path in paths):
+                raise FileNotFoundError("one or more crops do not exist")
+            for path in paths:
+                path.unlink()
+
     def _worker(self) -> None:
         while True:
             job = self._queue.get()

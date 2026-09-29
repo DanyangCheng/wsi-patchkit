@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import math
 import os
@@ -11,15 +12,19 @@ import tempfile
 import uuid
 from collections.abc import Callable, Mapping
 from contextlib import asynccontextmanager, suppress
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING, TypeVar
+from urllib.parse import parse_qs, quote
+from zipfile import ZIP_STORED, ZipFile
 
 if TYPE_CHECKING:
     from .__main__ import SlideDirectoryScanner
 
 try:
     from fastapi import FastAPI, HTTPException, Request
-    from fastapi.responses import HTMLResponse, JSONResponse, Response
+    from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
+    from starlette.background import BackgroundTask
 except ImportError as error:  # pragma: no cover - exercised without the web extra
     raise ImportError(
         "The WSI viewer requires the 'web' extra: uv sync --extra web"
@@ -38,9 +43,13 @@ _LOGGER = logging.getLogger(__name__)
 _STATIC_ASSETS = {
     "app.js": (_STATIC_DIR / "app.js").read_bytes(),
     "styles.css": (_STATIC_DIR / "styles.css").read_bytes(),
+    "crops.js": (_STATIC_DIR / "crops.js").read_bytes(),
+    "crops.css": (_STATIC_DIR / "crops.css").read_bytes(),
 }
 _INDEX_HTML = (_STATIC_DIR / "index.html").read_text(encoding="utf-8")
+_CROPS_HTML = (_STATIC_DIR / "crops.html").read_text(encoding="utf-8")
 _CROP_FILENAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,199}$")
+_CROP_IMAGE_EXTENSIONS = frozenset({".jpg", ".jpeg", ".png"})
 _UPLOAD_EXTENSIONS = frozenset(
     {
         ".bif",
@@ -384,6 +393,10 @@ def create_app(
     async def index() -> HTMLResponse:
         return HTMLResponse(_INDEX_HTML)
 
+    @app.get("/crops", include_in_schema=False)
+    async def crop_manager() -> HTMLResponse:
+        return HTMLResponse(_CROPS_HTML)
+
     @app.get("/static/{asset_name}", include_in_schema=False)
     async def static_asset(asset_name: str) -> Response:
         try:
@@ -396,6 +409,161 @@ def create_app(
             media_type=media_type,
             headers={"Cache-Control": "no-cache"},
         )
+
+    def saved_crop_path(filename: str) -> Path:
+        if (
+            not _CROP_FILENAME.fullmatch(filename)
+            or Path(filename).name != filename
+            or Path(filename).suffix.lower() not in _CROP_IMAGE_EXTENSIONS
+        ):
+            raise HTTPException(status_code=404, detail="unknown crop")
+        path = crop_directory / filename
+        if path.is_symlink() or not path.is_file():
+            raise HTTPException(status_code=404, detail="unknown crop")
+        return path
+
+    def crop_filenames(payload: Mapping[str, object]) -> list[str]:
+        value = payload.get("filenames")
+        if not isinstance(value, list) or not value:
+            raise HTTPException(
+                status_code=400,
+                detail="filenames must be a non-empty list",
+            )
+        if any(not isinstance(filename, str) for filename in value):
+            raise HTTPException(status_code=400, detail="invalid crop filename")
+        filenames = list(dict.fromkeys(value))
+        for filename in filenames:
+            saved_crop_path(filename)
+        return filenames
+
+    def create_crop_archive(filenames: list[str]) -> str:
+        descriptor, archive_name = tempfile.mkstemp(
+            prefix=".crop-download-",
+            suffix=".zip",
+            dir=crop_directory,
+        )
+        os.close(descriptor)
+        try:
+            with ZipFile(archive_name, "w", compression=ZIP_STORED) as archive:
+                for filename in filenames:
+                    archive.write(saved_crop_path(filename), arcname=filename)
+        except Exception:
+            Path(archive_name).unlink(missing_ok=True)
+            raise
+        return archive_name
+
+    @app.get("/api/crops", name="list_crops")
+    def list_crops() -> list[dict[str, object]]:
+        if not crop_directory.is_dir():
+            return []
+        records = []
+        for path in crop_directory.iterdir():
+            if (
+                path.is_symlink()
+                or not path.is_file()
+                or not _CROP_FILENAME.fullmatch(path.name)
+                or path.suffix.lower() not in _CROP_IMAGE_EXTENSIONS
+            ):
+                continue
+            try:
+                stat = path.stat()
+            except OSError:
+                continue
+            encoded_name = quote(path.name, safe="")
+            records.append(
+                {
+                    "filename": path.name,
+                    "format": path.suffix.lstrip(".").upper(),
+                    "size_bytes": stat.st_size,
+                    "modified_at": datetime.fromtimestamp(
+                        stat.st_mtime, tz=timezone.utc
+                    ).isoformat(),
+                    "image_url": f"/api/crops/{encoded_name}/image",
+                    "download_url": f"/api/crops/{encoded_name}/download",
+                }
+            )
+        records.sort(key=lambda record: str(record["modified_at"]), reverse=True)
+        return records
+
+    @app.get("/api/crops/{filename}/image", name="crop_image")
+    async def crop_image(filename: str) -> FileResponse:
+        path = saved_crop_path(filename)
+        media_type = "image/png" if path.suffix.lower() == ".png" else "image/jpeg"
+        return FileResponse(
+            path,
+            media_type=media_type,
+            headers={"Cache-Control": "private, no-store"},
+        )
+
+    @app.get("/api/crops/{filename}/download", name="download_crop")
+    async def download_crop(filename: str) -> FileResponse:
+        path = saved_crop_path(filename)
+        media_type = "image/png" if path.suffix.lower() == ".png" else "image/jpeg"
+        return FileResponse(
+            path,
+            media_type=media_type,
+            filename=filename,
+            headers={"Cache-Control": "private, no-store"},
+        )
+
+    @app.post("/api/crops/batch-download", name="download_crops")
+    async def download_crops(request: Request) -> FileResponse:
+        content_type = request.headers.get("content-type", "").split(";", 1)[0]
+        try:
+            if content_type == "application/x-www-form-urlencoded":
+                form = parse_qs((await request.body()).decode("utf-8"))
+                encoded_filenames = form.get("filenames", [])
+                if len(encoded_filenames) != 1:
+                    raise ValueError("filenames field is required")
+                payload = {"filenames": json.loads(encoded_filenames[0])}
+            elif content_type == "application/json":
+                payload = await request.json()
+            else:
+                raise ValueError("unsupported request content type")
+        except (UnicodeDecodeError, json.JSONDecodeError, ValueError) as error:
+            raise HTTPException(
+                status_code=400,
+                detail="invalid crop download request",
+            ) from error
+        if not isinstance(payload, Mapping):
+            raise HTTPException(status_code=400, detail="invalid crop download request")
+        filenames = crop_filenames(payload)
+        archive_name = await asyncio.to_thread(create_crop_archive, filenames)
+        return FileResponse(
+            archive_name,
+            media_type="application/zip",
+            filename="wsi-patchkit-crops.zip",
+            headers={"Cache-Control": "private, no-store"},
+            background=BackgroundTask(os.unlink, archive_name),
+        )
+
+    @app.post("/api/crops/batch-delete", name="delete_crops")
+    async def delete_crops(payload: dict[str, object]) -> dict[str, object]:
+        filenames = crop_filenames(payload)
+        try:
+            crop_jobs.delete_saved_crops(filenames)
+        except FileNotFoundError as error:
+            raise HTTPException(status_code=404, detail="unknown crop") from error
+        except RuntimeError as error:
+            raise HTTPException(
+                status_code=409,
+                detail="one or more crops are still being rendered",
+            ) from error
+        return {"filenames": filenames, "deleted": len(filenames)}
+
+    @app.delete("/api/crops/{filename}", name="delete_crop")
+    async def delete_crop(filename: str) -> dict[str, object]:
+        saved_crop_path(filename)
+        try:
+            crop_jobs.delete_saved_crops([filename])
+        except FileNotFoundError as error:
+            raise HTTPException(status_code=404, detail="unknown crop") from error
+        except RuntimeError as error:
+            raise HTTPException(
+                status_code=409,
+                detail="crop is still being rendered",
+            ) from error
+        return {"filename": filename, "deleted": True}
 
     @app.get("/api/slides", name="list_slides")
     async def list_slides() -> list[dict[str, str]]:

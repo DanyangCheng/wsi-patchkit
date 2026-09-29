@@ -140,7 +140,9 @@ file. The viewer remembers the most recently entered crop width and height when
 switching slides or reloading the page. Saving submits work to a background
 queue, so another crop can be positioned and submitted while earlier jobs are
 still running. One crop worker is used by default; use `--crop-workers N` to
-change the background concurrency.
+change the background concurrency. Open **裁剪图管理** in the viewer toolbar to
+preview and search saved crop images, download selected images as a ZIP, or delete
+one or more selections.
 
 Applications can embed the viewer server instead of using the CLI:
 

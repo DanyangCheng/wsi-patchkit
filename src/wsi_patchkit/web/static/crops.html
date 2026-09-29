@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>裁剪图管理 · WSI PatchKit</title>
+    <link rel="stylesheet" href="/static/crops.css?v=2" />
+    <script src="/static/crops.js?v=2" defer></script>
+  </head>
+  <body>
+    <header class="topbar">
+      <a class="brand" href="/" aria-label="返回 WSI PatchKit 查看器">
+        <span class="brand-mark" aria-hidden="true"></span>
+        <span>
+          <strong>WSI PatchKit</strong>
+          <small>Whole-slide viewer</small>
+        </span>
+      </a>
+      <a class="back-link" href="/">返回切片查看器 <span aria-hidden="true">↗</span></a>
+    </header>
+
+    <main class="page-shell">
+      <section class="page-heading">
+        <div>
+          <p class="eyebrow">IMAGE LIBRARY</p>
+          <h1>裁剪图管理</h1>
+          <p class="description">浏览、下载或删除保存在服务器上的裁剪图像。</p>
+        </div>
+        <button id="refresh-crops" class="secondary-button" type="button">
+          <span aria-hidden="true">↻</span> 刷新列表
+        </button>
+      </section>
+
+      <section class="library-toolbar" aria-label="裁剪图列表工具">
+        <div class="library-summary">
+          <strong id="crop-count">正在读取…</strong>
+          <span id="crop-total-size"></span>
+        </div>
+        <label class="search-box">
+          <span aria-hidden="true">⌕</span>
+          <input id="crop-search" type="search" placeholder="按文件名搜索" aria-label="按文件名搜索裁剪图" />
+        </label>
+      </section>
+
+      <section class="selection-toolbar" aria-label="批量操作">
+        <label class="select-visible">
+          <input id="select-visible-crops" type="checkbox" />
+          <span>全选</span>
+        </label>
+        <span id="selected-crop-count" class="selected-count">已选 0 张</span>
+        <div class="bulk-actions">
+          <button id="download-selected-crops" class="action-button" type="button" disabled>
+            下载
+          </button>
+          <button id="delete-selected-crops" class="delete-button" type="button" disabled>
+            删除
+          </button>
+        </div>
+      </section>
+
+      <p id="crop-status" class="status-message" role="status" aria-live="polite"></p>
+      <section id="crop-grid" class="crop-grid" aria-label="已保存的裁剪图"></section>
+      <section id="crop-empty" class="empty-state" hidden>
+        <div class="empty-icon" aria-hidden="true">▧</div>
+        <h2 id="empty-title">还没有裁剪图</h2>
+        <p id="empty-description">返回切片查看器，使用“矩形裁剪”保存第一张图像。</p>
+        <a id="empty-viewer-link" class="primary-link" href="/">打开切片查看器</a>
+      </section>
+    </main>
+  </body>
+</html>
