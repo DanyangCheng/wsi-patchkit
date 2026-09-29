@@ -42,7 +42,18 @@ _STATIC_ASSETS = {
 _INDEX_HTML = (_STATIC_DIR / "index.html").read_text(encoding="utf-8")
 _CROP_FILENAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,199}$")
 _UPLOAD_EXTENSIONS = frozenset(
-    {".bif", ".btf", ".btiff", ".ndpi", ".qptiff", ".scn", ".svs", ".tif", ".tiff"}
+    {
+        ".bif",
+        ".btf",
+        ".btiff",
+        ".kfb",
+        ".ndpi",
+        ".qptiff",
+        ".scn",
+        ".svs",
+        ".tif",
+        ".tiff",
+    }
 )
 
 

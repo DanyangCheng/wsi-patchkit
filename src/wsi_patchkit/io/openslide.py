@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections import OrderedDict
 from collections.abc import Sequence
+from importlib import import_module
 from pathlib import Path
 from typing import Any
 
@@ -14,19 +15,22 @@ from ..types import LevelInfo, PixelFormat, SlideMetadata, as_mpp
 
 
 class OpenSlideReader:
-    """Worker-local OpenSlide reader with an LRU handle cache."""
+    """Worker-local OpenSlide-compatible reader with an LRU handle cache."""
+
+    _backend_module = "openslide"
+    _missing_backend_message = (
+        "OpenSlideReader requires the 'openslide' or 'openslide-binary' extra"
+    )
 
     def __init__(self, cache_size: int = 4) -> None:
         if cache_size < 1:
             raise ValueError("cache_size must be at least one")
         try:
-            import openslide
+            backend = import_module(self._backend_module)
         except ImportError as error:
-            raise ImportError(
-                "OpenSlideReader requires the 'openslide' or 'openslide-binary' extra"
-            ) from error
+            raise ImportError(self._missing_backend_message) from error
         self.cache_size = int(cache_size)
-        self._openslide = openslide
+        self._openslide = backend
         # LRU cache queue
         self._slides: OrderedDict[str, Any] = OrderedDict()
 
@@ -40,7 +44,10 @@ class OpenSlideReader:
     def _slide(self, path: str) -> Any:
         slide = self._slides.get(path)
         if slide is None:
-            slide = self._openslide.OpenSlide(path)
+            try:
+                slide = self._openslide.OpenSlide(path)
+            except self._openslide.OpenSlideError as error:
+                raise OSError(f"unable to open slide {path}: {error}") from error
             self._slides[path] = slide
             if len(self._slides) > self.cache_size:
                 _, evicted = self._slides.popitem(last=False)
@@ -48,6 +55,17 @@ class OpenSlideReader:
         else:
             self._slides.move_to_end(path)
         return slide
+
+    def _level_downsample(
+        self,
+        _slide: Any,
+        level: int,
+        base_dimensions: tuple[int, int],
+        dimensions: tuple[int, int],
+    ) -> tuple[float, float]:
+        width0, height0 = base_dimensions
+        width, height = dimensions
+        return width0 / width, height0 / height
 
     def metadata(
         self,
@@ -72,7 +90,12 @@ class OpenSlideReader:
         levels = []
         for level, dimensions in enumerate(slide.level_dimensions):
             width, height = map(int, dimensions)
-            downsample = width0 / width, height0 / height
+            downsample = self._level_downsample(
+                slide,
+                level,
+                (width0, height0),
+                (width, height),
+            )
             level_mpp = (
                 None
                 if base_mpp is None
@@ -109,11 +132,16 @@ class OpenSlideReader:
         width, height = map(int, size)
         if width < 1 or height < 1:
             raise ValueError("region size must be positive")
-        image = self._slide(resolved).read_region(
-            tuple(map(int, location)),
-            int(level),
-            (width, height),
-        )
+        try:
+            image = self._slide(resolved).read_region(
+                tuple(map(int, location)),
+                int(level),
+                (width, height),
+            )
+        except self._openslide.OpenSlideError as error:
+            raise OSError(
+                f"unable to read slide region from {resolved}: {error}"
+            ) from error
         rgba = np.asarray(image.convert("RGBA"), dtype=np.uint8)
         alpha = rgba[..., 3:4].astype(np.uint32)
         rgb = (

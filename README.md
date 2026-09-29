@@ -3,7 +3,7 @@
 `wsi-patchkit` is a small, backend-neutral library for reading patches from
 whole-slide images (WSIs). Version 0.1 provides:
 
-- TIFF and optional OpenSlide readers with a common coordinate contract;
+- TIFF, KFB, and OpenSlide readers with a common coordinate contract;
 - physical-resolution (MPP) metadata and level selection;
 - target-MPP-aligned, boundary-padded patch reads;
 - deterministic grid, random, indexed, and tissue-filtered sampling;
@@ -68,8 +68,8 @@ uv run wsi-patchkit-viewer --slide-dir /data/slides
 ```
 
 `--slide-dir` is repeatable and can be combined with `--slide`. Recognized file
-extensions are `.svs`, `.tif`, `.tiff`, `.ndpi`, `.mrxs`, `.scn`, `.vms`,
-`.vmu`, `.bif`, and `.qptiff`.
+extensions are `.svs`, `.tif`, `.tiff`, `.kfb`, `.ndpi`, `.mrxs`, `.scn`,
+`.vms`, `.vmu`, `.bif`, and `.qptiff`.
 The slide picker shows discovered files under their relative folders; folders
 can be expanded, and search matches both folder names and slide names.
 
@@ -80,13 +80,13 @@ Files are saved in `./uploads` by default. Use `--upload-dir /path/to/uploads`
 to choose a persistent location. Uploads are limited to 32 GiB by default; set
 `--max-upload-gb N` to change the limit. The viewer can start without registered
 slides and accept its first slide through the browser. Supported upload
-extensions are `.svs`, `.tif`, `.tiff`, `.btf`, `.btiff`, `.ndpi`, `.qptiff`,
-`.scn`, and `.bif`.
+extensions are `.svs`, `.tif`, `.tiff`, `.btf`, `.btiff`, `.kfb`, `.ndpi`,
+`.qptiff`, `.scn`, and `.bif`.
 
 Then open <http://127.0.0.1:8000>. The viewer supports mouse-wheel and pinch
 zooming, drag panning, double-click zooming, a navigator, level-0 coordinates,
-and an MPP-aware scale bar. TIFF files use the bundled tifffile reader; other
-formats are routed to the optional OpenSlide reader.
+and an MPP-aware scale bar. TIFF files use the bundled tifffile reader, `.kfb`
+files use `kfbslide`, and other formats are routed to the OpenSlide reader.
 
 ### Docker Compose
 
@@ -347,7 +347,7 @@ membership, and target encoding stay in the downstream application.
 
 ```python
 from wsi_patchkit import RandomPatchRequestSampler, SlideSpec
-from wsi_patchkit.io import TiffReader
+from wsi_patchkit.io import AutoSlideReader
 from wsi_patchkit.torch import WSIPatchIterableDataset
 
 dataset = WSIPatchIterableDataset(
@@ -355,12 +355,14 @@ dataset = WSIPatchIterableDataset(
     request_sampler=RandomPatchRequestSampler(
         num_samples=20_000, patch_size=512, seed=2026
     ),
-    reader_factory=TiffReader,
+    reader_factory=AutoSlideReader,
 )
 ```
 
-Each worker creates and closes its own reader. Items contain a float32 CHW
-`image` tensor in `[0, 1]` plus the original `PatchRequest`.
+`AutoSlideReader` routes KFB files to `kfbslide` and TIFF files to tifffile, so
+one training dataset can contain slides in both formats. Each worker creates
+and closes its own reader. Items contain a float32 CHW `image` tensor in
+`[0, 1]` plus the original `PatchRequest`.
 
 `PatchRequestSampler` is a domain-level request generator, not a PyTorch
 `torch.utils.data.Sampler`: the latter yields integer indices to a map-style

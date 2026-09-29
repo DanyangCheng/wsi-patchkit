@@ -13,7 +13,13 @@ from .geometry import (
     read_aligned_patch_result,
     virtual_canvas_size,
 )
-from .io import AutoSlideReader, OpenSlideReader, SlideReader, TiffReader
+from .io import (
+    AutoSlideReader,
+    KfbSlideReader,
+    OpenSlideReader,
+    SlideReader,
+    TiffReader,
+)
 from .sampling import (
     GridPatchRequestSampler,
     IndexedPatchRequestSampler,
@@ -60,6 +66,7 @@ __all__ = [
     "GridPatchRequestSampler",
     "IndexedPatchRequestSampler",
     "Interpolation",
+    "KfbSlideReader",
     "LevelSelectionPolicy",
     "LevelInfo",
     "OpenSlideReader",

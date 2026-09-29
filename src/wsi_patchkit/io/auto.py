@@ -10,22 +10,25 @@ from numpy.typing import NDArray
 
 from ..types import SlideMetadata
 from .base import SlideReader
+from .kfbslide import KfbSlideReader
 from .openslide import OpenSlideReader
 from .tiff import TiffReader
 
 _TIFF_SUFFIXES = {".tif", ".tiff", ".btf", ".btiff"}
+_KFB_SUFFIXES = {".kfb"}
 
 
 class AutoSlideReader:
-    """Route generic TIFF files to tifffile and other WSIs to OpenSlide.
+    """Route TIFF to tifffile, KFB to kfbslide, and other WSIs to OpenSlide.
 
-    OpenSlide is imported lazily, so TIFF-only applications do not need the
-    optional native dependency.
+    Optional readers are imported lazily, so TIFF-only applications do not need
+    their additional dependencies.
     """
 
     def __init__(self, cache_size: int = 4) -> None:
         self.cache_size = int(cache_size)
         self._tiff = TiffReader(cache_size=cache_size)
+        self._kfb: KfbSlideReader | None = None
         self._openslide: OpenSlideReader | None = None
         self._tiff_routes: dict[str, bool] = {}
 
@@ -44,6 +47,10 @@ class AutoSlideReader:
             return bool(tif.is_svs or description.lstrip().startswith("Aperio"))
 
     def _reader(self, path: str | Path) -> SlideReader:
+        if Path(path).suffix.lower() in _KFB_SUFFIXES:
+            if self._kfb is None:
+                self._kfb = KfbSlideReader(cache_size=self.cache_size)
+            return self._kfb
         if Path(path).suffix.lower() in _TIFF_SUFFIXES:
             resolved = str(Path(path).resolve())
             is_aperio = self._tiff_routes.get(resolved)
@@ -76,6 +83,9 @@ class AutoSlideReader:
     def close(self) -> None:
         self._tiff.close()
         self._tiff_routes.clear()
+        if self._kfb is not None:
+            self._kfb.close()
+            self._kfb = None
         if self._openslide is not None:
             self._openslide.close()
             self._openslide = None

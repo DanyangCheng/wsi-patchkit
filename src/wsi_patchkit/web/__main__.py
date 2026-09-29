@@ -12,6 +12,7 @@ from pathlib import Path
 SLIDE_EXTENSIONS = frozenset(
     {
         ".bif",
+        ".kfb",
         ".mrxs",
         ".ndpi",
         ".qptiff",

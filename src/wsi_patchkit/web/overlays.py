@@ -241,7 +241,11 @@ class IndexedOverlay:
             for source in (fragment.source, fragment.coverage):
                 if source is not None:
                     stat = Path(source.path).stat()
-                    fingerprint.extend((str(source.path), stat.st_size, stat.st_mtime_ns))
+                    fingerprint.extend((
+                        str(source.path),
+                        stat.st_size,
+                        stat.st_mtime_ns
+                        ))
         return hashlib.sha256(repr(fingerprint).encode("utf-8")).hexdigest()[:16]
 
     def public_metadata(self) -> dict[str, object]:

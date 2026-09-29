@@ -444,6 +444,18 @@ wheels = [
 ]
 
 [[package]]
+name = "kfbslide"
+version = "0.3.2"
+source = { registry = "https://mirrors.aliyun.com/pypi/simple/" }
+dependencies = [
+    { name = "pillow" },
+]
+sdist = { url = "https://mirrors.aliyun.com/pypi/packages/4e/9f/786c0295bd339757a4206b36d0202b09cc9b2794df807902775f6727eb27/kfbslide-0.3.2.tar.gz", hash = "sha256:3b07960f4086bb11fffb3de8be0311600a57abeb506a830157726a9a600d33a5" }
+wheels = [
+    { url = "https://mirrors.aliyun.com/pypi/packages/52/6e/1a6841e73ba5b278ebc7dd75fe735119ded1c16cacd684ca629171015837/kfbslide-0.3.2-py3-none-any.whl", hash = "sha256:239e49c41bd8424a930b806ca1e228664519123eb107efbe98443278364b0cd3" },
+]
+
+[[package]]
 name = "markupsafe"
 version = "3.0.3"
 source = { registry = "https://mirrors.aliyun.com/pypi/simple/" }
@@ -2057,6 +2069,7 @@ name = "wsi-patchkit"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [
+    { name = "kfbslide" },
     { name = "numpy", version = "2.2.6", source = { registry = "https://mirrors.aliyun.com/pypi/simple/" }, marker = "python_full_version < '3.11'" },
     { name = "numpy", version = "2.4.6", source = { registry = "https://mirrors.aliyun.com/pypi/simple/" }, marker = "python_full_version == '3.11.*'" },
     { name = "numpy", version = "2.5.3", source = { registry = "https://mirrors.aliyun.com/pypi/simple/" }, marker = "python_full_version >= '3.12'" },
@@ -2089,6 +2102,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "fastapi", marker = "extra == 'web'", specifier = ">=0.115" },
+    { name = "kfbslide", specifier = ">=0.3.2" },
     { name = "numpy", specifier = ">=1.26" },
     { name = "openslide-bin", specifier = ">=4.0" },
     { name = "openslide-python", specifier = ">=1.3" },
