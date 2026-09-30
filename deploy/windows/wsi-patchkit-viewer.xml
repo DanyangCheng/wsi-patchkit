@@ -1,0 +1,18 @@
+<service>
+  <id>wsiPatchkitViewer</id>
+  <name>WSI PatchKit Viewer</name>
+  <description>Local whole-slide image viewer powered by wsi-patchkit.</description>
+  <executable>@VIEWER_EXE@</executable>
+  <arguments>-m wsi_patchkit.web --slide-dir "@SLIDE_DIR@" --host 127.0.0.1 --port 8000 --reader-pool-size 4 --reader-cache-size 1 --kfb-index-cache-dir "%BASE%\cache\kfb-index" --crop-output-dir "%BASE%\data\crops" --upload-dir "%BASE%\data\uploads"</arguments>
+  <workingdirectory>@PROJECT_DIR@</workingdirectory>
+  <startmode>Automatic</startmode>
+  <delayedAutoStart>true</delayedAutoStart>
+  <onfailure action="restart" delay="10 sec" />
+  <resetfailure>1 hour</resetfailure>
+  <stoptimeout>30 sec</stoptimeout>
+  <serviceaccount>
+    <prompt>console</prompt>
+  </serviceaccount>
+  <logpath>%BASE%\logs</logpath>
+  <log mode="roll" />
+</service>

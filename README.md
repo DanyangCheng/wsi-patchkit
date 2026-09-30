@@ -88,6 +88,10 @@ zooming, drag panning, double-click zooming, a navigator, level-0 coordinates,
 and an MPP-aware scale bar. TIFF files use the bundled tifffile reader, `.kfb`
 files use `kfbslide`, and other formats are routed to the OpenSlide reader.
 
+On Windows, the viewer can run as a background service managed by WinSW. See
+[Windows service setup](docs/WINDOWS_SERVICE.md) for installation and service
+control commands.
+
 ### Docker Compose
 
 Create the slide directory, then build and start the viewer. WSI files can be
