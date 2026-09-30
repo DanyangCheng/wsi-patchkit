@@ -12,6 +12,7 @@ import numpy as np
 from numpy.typing import NDArray
 
 from ..types import LevelInfo, PixelFormat, SlideMetadata, as_mpp
+from ._color import image_to_rgb
 
 
 class OpenSlideReader:
@@ -33,6 +34,7 @@ class OpenSlideReader:
         self._openslide = backend
         # LRU cache queue
         self._slides: OrderedDict[str, Any] = OrderedDict()
+        self._signatures: dict[str, tuple[int, int]] = {}
 
     @staticmethod
     def _path(path: str | Path) -> str:
@@ -42,15 +44,23 @@ class OpenSlideReader:
         return str(resolved)
 
     def _slide(self, path: str) -> Any:
+        stat = Path(path).stat()
+        signature = (stat.st_size, stat.st_mtime_ns)
         slide = self._slides.get(path)
+        if slide is not None and self._signatures.get(path) != signature:
+            self._slides.pop(path).close()
+            self._signatures.pop(path, None)
+            slide = None
         if slide is None:
             try:
                 slide = self._open_slide(path)
             except self._openslide.OpenSlideError as error:
                 raise OSError(f"unable to open slide {path}: {error}") from error
             self._slides[path] = slide
+            self._signatures[path] = signature
             if len(self._slides) > self.cache_size:
-                _, evicted = self._slides.popitem(last=False)
+                evicted_path, evicted = self._slides.popitem(last=False)
+                self._signatures.pop(evicted_path, None)
                 evicted.close()
         else:
             self._slides.move_to_end(path)
@@ -145,17 +155,13 @@ class OpenSlideReader:
             raise OSError(
                 f"unable to read slide region from {resolved}: {error}"
             ) from error
-        rgba = np.asarray(image.convert("RGBA"), dtype=np.uint8)
-        alpha = rgba[..., 3:4].astype(np.uint32)
-        rgb = (
-            rgba[..., :3].astype(np.uint32) * alpha + 255 * (255 - alpha) + 127
-        ) // 255
-        return rgb.astype(np.uint8)
+        return image_to_rgb(image)
 
     def close(self) -> None:
         for slide in self._slides.values():
             slide.close()
         self._slides.clear()
+        self._signatures.clear()
 
     def __enter__(self) -> OpenSlideReader:
         return self

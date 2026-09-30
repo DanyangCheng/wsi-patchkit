@@ -14,7 +14,7 @@ WORKDIR /app
 
 RUN groupadd --system --gid 10001 patchkit \
     && useradd --system --uid 10001 --gid patchkit --home-dir /app patchkit \
-    && mkdir -p /data/slides /data/overlays /data/crops /data/uploads \
+    && mkdir -p /data/slides /data/overlays /data/crops /data/uploads /data/cache \
     && chown -R patchkit:patchkit /app /data
 
 # Copy packaging metadata first so dependency installation remains cached when
@@ -27,10 +27,10 @@ RUN python -m pip install --no-cache-dir ".[web]" -i https://pypi.tuna.tsinghua.
 USER patchkit
 
 EXPOSE 8000
-VOLUME ["/data/crops", "/data/uploads"]
+VOLUME ["/data/crops", "/data/uploads", "/data/cache"]
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
     CMD ["python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/slides', timeout=3)"]
 
 ENTRYPOINT ["wsi-patchkit-viewer"]
-CMD ["--host", "0.0.0.0", "--port", "8000", "--slide-dir", "/data/slides", "--overlay-root", "/data/overlays", "--crop-output-dir", "/data/crops", "--upload-dir", "/data/uploads"]
+CMD ["--host", "0.0.0.0", "--port", "8000", "--slide-dir", "/data/slides", "--overlay-root", "/data/overlays", "--crop-output-dir", "/data/crops", "--upload-dir", "/data/uploads", "--kfb-index-cache-dir", "/data/cache/kfb-index"]

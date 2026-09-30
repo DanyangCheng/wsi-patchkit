@@ -21,6 +21,7 @@ import numpy as np
 from numpy.typing import NDArray
 from PIL import Image
 
+from .io._color import image_to_rgb
 from .io.base import SlideReader
 from .types import MPP, LevelInfo, SlideMetadata, as_mpp
 
@@ -49,9 +50,10 @@ def iiif_scale_factors(
     if width < 1 or height < 1 or tile_size < 1:
         raise ValueError("dimensions and tile_size must be positive")
     factors = [1]
-    while math.ceil(width / factors[-1]) > tile_size or math.ceil(
-        height / factors[-1]
-    ) > tile_size:
+    while (
+        math.ceil(width / factors[-1]) > tile_size
+        or math.ceil(height / factors[-1]) > tile_size
+    ):
         factors.append(factors[-1] * 2)
     return tuple(factors)
 
@@ -95,12 +97,7 @@ def _as_rgb(array: NDArray[np.generic]) -> NDArray[np.uint8]:
     if array.shape[2] == 1:
         array = np.repeat(array, 3, axis=2)
     elif array.shape[2] == 4:
-        alpha = array[..., 3:4].astype(np.uint32)
-        array = (
-            array[..., :3].astype(np.uint32) * alpha
-            + 255 * (255 - alpha)
-            + 127
-        ) // 255
+        return image_to_rgb(Image.fromarray(array))
     elif array.shape[2] >= 3:
         array = array[..., :3]
     else:

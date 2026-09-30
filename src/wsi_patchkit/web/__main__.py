@@ -237,6 +237,30 @@ def main() -> None:
     parser.add_argument("--tile-size", default=512, type=int)
     parser.add_argument("--reader-pool-size", default=4, type=int)
     parser.add_argument(
+        "--reader-cache-size",
+        default=1,
+        type=int,
+        help="maximum cached slides per reader (default: 1)",
+    )
+    parser.add_argument(
+        "--kfb-index-cache-dir",
+        default=Path(".cache/kfb-index"),
+        type=Path,
+        help="persistent SQLite KFB index directory; prefer local SSD storage",
+    )
+    parser.add_argument(
+        "--kfb-tile-cache-size",
+        default=128,
+        type=int,
+        help="decoded KFB tiles cached per open slide (default: 128)",
+    )
+    parser.add_argument(
+        "--scan-interval",
+        default=5.0,
+        type=float,
+        help="minimum directory rescan interval in seconds (default: 5)",
+    )
+    parser.add_argument(
         "--debug-render",
         action="store_true",
         help="log actual render regions, native read sizes, and elapsed times",
@@ -300,6 +324,12 @@ def main() -> None:
         parser.error("--debug-stack-interval must be finite and non-negative")
     if args.max_upload_gb < 1:
         parser.error("--max-upload-gb must be positive")
+    if args.reader_pool_size < 1 or args.reader_cache_size < 1:
+        parser.error("reader pool and cache sizes must be positive")
+    if args.kfb_tile_cache_size < 0:
+        parser.error("--kfb-tile-cache-size must be non-negative")
+    if not math.isfinite(args.scan_interval) or args.scan_interval < 0:
+        parser.error("--scan-interval must be finite and non-negative")
 
     try:
         import uvicorn
@@ -321,7 +351,11 @@ def main() -> None:
     explicit_slides = dict(args.slide or [])
     directories = [*args.slide_dir, *args.slides]
     try:
-        scanner = SlideDirectoryScanner(directories, explicit_slides)
+        scanner = SlideDirectoryScanner(
+            directories,
+            explicit_slides,
+            interval=args.scan_interval,
+        )
         slides = scanner.refresh()
     except NotADirectoryError as error:
         parser.error(f"slide directory does not exist: {error}")
@@ -345,9 +379,7 @@ def main() -> None:
                 # An ambiguous source stem must not silently select a slide.
                 slide_id[stem] = None
         manifest_slide_id_aliases = {
-            stem: id
-            for stem, id in slide_id.items()
-            if id is not None
+            stem: id for stem, id in slide_id.items() if id is not None
         }
         discovered_overlays = discover_overlays(
             args.overlay_root,
@@ -371,6 +403,9 @@ def main() -> None:
         manifest_slide_id_aliases=manifest_slide_id_aliases,
         tile_size=args.tile_size,
         reader_pool_size=args.reader_pool_size,
+        reader_cache_size=args.reader_cache_size,
+        kfb_index_cache_dir=args.kfb_index_cache_dir,
+        kfb_tile_cache_size=args.kfb_tile_cache_size,
         crop_output_dir=args.crop_output_dir,
         upload_dir=args.upload_dir,
         max_upload_bytes=args.max_upload_gb * 1024**3,

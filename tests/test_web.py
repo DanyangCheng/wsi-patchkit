@@ -369,7 +369,7 @@ async def test_viewer_serves_metadata_tiles_and_frontend(tmp_path: Path) -> None
     assert index.status_code == 200
     assert "WSI PatchKit Viewer" in index.text
     assert "/static/styles.css?v=13" in index.text
-    assert "/static/app.js?v=18" in index.text
+    assert "/static/app.js?v=19" in index.text
     assert script.status_code == 200
     assert "dragToPan" in script.text
     assert "populateSlideMenu" in script.text
@@ -727,3 +727,116 @@ async def test_tile_worker_pool_skips_cancelled_queued_work() -> None:
         workers.close()
 
     assert not queued_ran
+
+@pytest.mark.anyio
+async def test_worker_backpressure_can_be_cancelled_before_enqueuing() -> None:
+    started = threading.Event()
+    release = threading.Event()
+    workers = TileWorkerPool(1, max_pending=1)
+
+    def blocking():
+        started.set()
+        release.wait(timeout=3)
+
+    first = asyncio.create_task(workers.run(blocking))
+    try:
+        for _ in range(100):
+            if started.is_set():
+                break
+            await asyncio.sleep(0.01)
+        assert started.is_set()
+        second = asyncio.create_task(workers.run(lambda: "obsolete"))
+        await asyncio.sleep(0.02)
+        assert workers._queue.qsize() == 0
+        second.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await second
+        release.set()
+        await first
+        assert await workers.run(lambda: "current") == "current"
+    finally:
+        release.set()
+        workers.close()
+
+
+@pytest.mark.anyio
+async def test_directory_scan_does_not_block_tile_or_metadata_work(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    path = tmp_path / "slide.tif"
+    _write_slide(path)
+    scanner = SlideDirectoryScanner([tmp_path], interval=0)
+    started = threading.Event()
+    release = threading.Event()
+    original = scanner.refresh
+
+    def blocked_scan():
+        started.set()
+        release.wait(timeout=3)
+        return original()
+
+    monkeypatch.setattr(scanner, "refresh", blocked_scan)
+    app = create_app(
+        {"slide.tif": path},
+        reader=TiffReader(),
+        tile_workers=1,
+        slide_scanner=scanner,
+    )
+    transport = httpx.ASGITransport(app=app)
+    async with (
+        app.router.lifespan_context(app),
+        httpx.AsyncClient(
+            transport=transport,
+            base_url="http://testserver",
+        ) as client,
+    ):
+        listing = asyncio.create_task(client.get("/api/slides"))
+        try:
+            for _ in range(100):
+                if started.is_set():
+                    break
+                await asyncio.sleep(0.01)
+            assert started.is_set()
+            tile = await asyncio.wait_for(
+                client.get(
+                    "/iiif/3/slide.tif/0,0,8,8/8,8/0/default.png",
+                ),
+                timeout=1,
+            )
+            assert tile.status_code == 200
+            assert not listing.done()
+        finally:
+            release.set()
+            await listing
+
+
+@pytest.mark.anyio
+async def test_cancelled_running_read_retains_queue_capacity() -> None:
+    started = threading.Event()
+    release = threading.Event()
+    workers = TileWorkerPool(1, max_pending=1)
+
+    def blocking():
+        started.set()
+        release.wait(timeout=3)
+
+    first = asyncio.create_task(workers.run(blocking))
+    try:
+        for _ in range(100):
+            if started.is_set():
+                break
+            await asyncio.sleep(0.01)
+        assert started.is_set()
+        first.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await first
+        second = asyncio.create_task(workers.run(lambda: "new view"))
+        await asyncio.sleep(0.02)
+        assert workers._queue.qsize() == 0
+        assert not second.done()
+        release.set()
+        assert await second == "new view"
+    finally:
+        release.set()
+        workers.close()

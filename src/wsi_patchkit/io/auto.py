@@ -25,8 +25,16 @@ class AutoSlideReader:
     their additional dependencies.
     """
 
-    def __init__(self, cache_size: int = 4) -> None:
+    def __init__(
+        self,
+        cache_size: int = 4,
+        *,
+        kfb_index_cache_dir: str | Path | None = None,
+        kfb_tile_cache_size: int = 256,
+    ) -> None:
         self.cache_size = int(cache_size)
+        self.kfb_index_cache_dir = kfb_index_cache_dir
+        self.kfb_tile_cache_size = kfb_tile_cache_size
         self._tiff = TiffReader(cache_size=cache_size)
         self._kfb: KfbSlideReader | None = None
         self._openslide: OpenSlideReader | None = None
@@ -49,7 +57,11 @@ class AutoSlideReader:
     def _reader(self, path: str | Path) -> SlideReader:
         if Path(path).suffix.lower() in _KFB_SUFFIXES:
             if self._kfb is None:
-                self._kfb = KfbSlideReader(cache_size=self.cache_size)
+                self._kfb = KfbSlideReader(
+                    cache_size=self.cache_size,
+                    index_cache_dir=self.kfb_index_cache_dir,
+                    tile_cache_size=self.kfb_tile_cache_size,
+                )
             return self._kfb
         if Path(path).suffix.lower() in _TIFF_SUFFIXES:
             resolved = str(Path(path).resolve())

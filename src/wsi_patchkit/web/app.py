@@ -19,6 +19,7 @@ from urllib.parse import parse_qs, quote
 from zipfile import ZIP_STORED, ZipFile
 
 from PIL import Image
+from tifffile import TiffFileError
 
 if TYPE_CHECKING:
     from .__main__ import SlideDirectoryScanner
@@ -84,9 +85,10 @@ def _overlay_palette(
 ) -> dict[int, RGBA] | None:
     if style is None:
         return None
-    if len(style) != 8 * len(overlay.classes) or re.fullmatch(
-        r"[0-9a-fA-F]+", style
-    ) is None:
+    if (
+        len(style) != 8 * len(overlay.classes)
+        or re.fullmatch(r"[0-9a-fA-F]+", style) is None
+    ):
         raise HTTPException(status_code=400, detail="invalid overlay palette")
     palette: dict[int, RGBA] = {}
     for index, item in enumerate(overlay.classes):
@@ -242,6 +244,9 @@ def create_app(
     reader: SlideReader | None = None,
     reader_factory: Callable[[], SlideReader] | None = None,
     reader_pool_size: int = 4,
+    reader_cache_size: int = 1,
+    kfb_index_cache_dir: str | Path | None = ".cache/kfb-index",
+    kfb_tile_cache_size: int = 128,
     tile_workers: int | None = None,
     tile_size: int = 256,
     cache_size: int = 512,
@@ -257,6 +262,8 @@ def create_app(
     """Create a self-contained WSI viewer for an explicit slide registry."""
     if tile_size < 1:
         raise ValueError("tile_size must be positive")
+    if reader_cache_size < 1 or kfb_tile_cache_size < 0:
+        raise ValueError("invalid reader cache size")
     if reader is not None and reader_factory is not None:
         raise ValueError("provide reader or reader_factory, not both")
     if crop_workers < 1:
@@ -268,6 +275,7 @@ def create_app(
         raise NotADirectoryError(upload_directory)
     initial_slides = dict(slides)
     uploaded_sources: dict[str, SlideSource] = {}
+    scanned_sources: dict[Path, SlideSource] = {}
     for path in sorted(upload_directory.iterdir()) if upload_directory.is_dir() else ():
         if (
             path.name.startswith(".upload-")
@@ -283,9 +291,7 @@ def create_app(
             uploaded_sources[slide_id] = SlideSource(path)
         except (OSError, ValueError):
             _LOGGER.warning("Skipping invalid uploaded slide %s", path)
-    registry = SlideRegistry(
-        {**initial_slides, **uploaded_sources}, allow_empty=True
-    )
+    registry = SlideRegistry({**initial_slides, **uploaded_sources}, allow_empty=True)
     upload_lock = asyncio.Lock()
     overlay_registry = OverlayRegistry(
         overlays,
@@ -302,7 +308,14 @@ def create_app(
         )
     else:
         renderer = TileRenderer(
-            reader_factory=reader_factory or AutoSlideReader,
+            reader_factory=reader_factory
+            or (
+                lambda: AutoSlideReader(
+                    cache_size=reader_cache_size,
+                    kfb_index_cache_dir=kfb_index_cache_dir,
+                    kfb_tile_cache_size=kfb_tile_cache_size,
+                )
+            ),
             reader_pool_size=reader_pool_size,
             cache_size=cache_size,
             jpeg_quality=jpeg_quality,
@@ -315,6 +328,8 @@ def create_app(
     _LOGGER.debug("Pillow plugin initialization END")
     worker_count = reader_pool_size if tile_workers is None else tile_workers
     workers = TileWorkerPool(worker_count)
+    discovery_workers = TileWorkerPool(1)
+    metadata_workers = TileWorkerPool(min(2, worker_count))
     overlay_workers = TileWorkerPool(max(1, worker_count // 2))
     crop_jobs = CropJobQueue(
         renderer,
@@ -331,6 +346,8 @@ def create_app(
     async def lifespan(_: FastAPI):
         yield
         crop_jobs.close()
+        discovery_workers.close()
+        metadata_workers.close()
         overlay_workers.close()
         overlay_renderer.close()
         workers.close()
@@ -342,6 +359,8 @@ def create_app(
     app.state.overlay_renderer = overlay_renderer
     app.state.tile_renderer = renderer
     app.state.tile_workers = workers
+    app.state.discovery_workers = discovery_workers
+    app.state.metadata_workers = metadata_workers
     app.state.overlay_workers = overlay_workers
     app.state.crop_output_dir = crop_directory
     app.state.crop_jobs = crop_jobs
@@ -351,8 +370,12 @@ def create_app(
         uploaded_paths = {source.path for source in uploaded_sources.values()}
         merged = {}
         for slide_id, source in scanned.items():
-            path = source.path if isinstance(source, SlideSource) else source
-            if Path(path).resolve() not in uploaded_paths:
+            path = (
+                source.path
+                if isinstance(source, SlideSource)
+                else Path(source).resolve()
+            )
+            if path not in uploaded_paths:
                 merged[slide_id] = source
         merged.update(uploaded_sources)
         registry.replace(merged)
@@ -363,11 +386,27 @@ def create_app(
         except KeyError as error:
             raise HTTPException(status_code=404, detail="unknown slide") from error
 
+    def scan_slides():
+        # Fetch both snapshots on the discovery thread: relative_paths() also
+        # takes the scanner lock and must not block the ASGI event loop.
+        nonlocal scanned_sources
+        assert slide_scanner is not None
+        snapshot = {}
+        sources = {}
+        for slide_id, path in slide_scanner.refresh().items():
+            source = scanned_sources.get(path)
+            if source is None:
+                source = SlideSource(path)
+            sources[path] = source
+            snapshot[slide_id] = source
+        scanned_sources = sources
+        return snapshot, slide_scanner.relative_paths()
+
     def metadata_for(slide_id: str) -> tuple[SlideSource, SlideMetadata]:
         source = source_for(slide_id)
         try:
             metadata = renderer.metadata(source.path, source_mpp=source.source_mpp)
-        except (ImportError, OSError, RuntimeError, ValueError) as error:
+        except (ImportError, OSError, RuntimeError, ValueError, TiffFileError) as error:
             _LOGGER.exception("Unable to read registered slide %s", slide_id)
             raise HTTPException(
                 status_code=422,
@@ -384,10 +423,20 @@ def create_app(
         return source, metadata
 
     def validate_uploaded_slide(path: Path) -> None:
-        metadata = renderer.metadata(path)
-        width = min(16, metadata.dimensions[0])
-        height = min(16, metadata.dimensions[1])
-        renderer.render_region(path, (0, 0, width, height), (width, height))
+        # Validation must release all handles before renaming a temporary
+        # upload on Windows. Do not pollute serving caches with temporary IDs.
+        validator = TileRenderer(
+            reader_factory=reader_factory or AutoSlideReader,
+            reader_pool_size=1,
+            cache_size=0,
+        )
+        try:
+            metadata = validator.metadata(path)
+            width = min(16, metadata.dimensions[0])
+            height = min(16, metadata.dimensions[1])
+            validator.render_region(path, (0, 0, width, height), (width, height))
+        finally:
+            validator.close()
 
     def overlay_for(slide_id: str, overlay_id: str) -> IndexedOverlay:
         source_for(slide_id)
@@ -577,8 +626,8 @@ def create_app(
         relative_paths: dict[str, str] = {}
         if slide_scanner is not None:
             try:
-                publish_slides(await workers.run(slide_scanner.refresh))
-                relative_paths = slide_scanner.relative_paths()
+                scanned, relative_paths = await discovery_workers.run(scan_slides)
+                publish_slides(scanned)
             except (OSError, ValueError):
                 _LOGGER.exception("Unable to refresh slide directories")
         # Keep directory browsing responsive even for large collections. Reading
@@ -608,7 +657,8 @@ def create_app(
             raise HTTPException(status_code=413, detail="slide upload is too large")
         upload_directory.mkdir(parents=True, exist_ok=True)
         descriptor, temporary_name = tempfile.mkstemp(
-            prefix=".upload-", suffix=Path(safe_name).suffix,
+            prefix=".upload-",
+            suffix=Path(safe_name).suffix,
             dir=upload_directory,
         )
         temporary_path = Path(temporary_name)
@@ -627,8 +677,14 @@ def create_app(
             if not size:
                 raise HTTPException(status_code=400, detail="slide upload is empty")
             try:
-                await workers.run(validate_uploaded_slide, temporary_path)
-            except (ImportError, OSError, RuntimeError, ValueError) as error:
+                await metadata_workers.run(validate_uploaded_slide, temporary_path)
+            except (
+                ImportError,
+                OSError,
+                RuntimeError,
+                ValueError,
+                TiffFileError,
+            ) as error:
                 raise HTTPException(
                     status_code=422, detail="uploaded slide could not be opened"
                 ) from error
@@ -638,9 +694,8 @@ def create_app(
                 candidate = safe_name
                 number = 2
                 while (
-                    (upload_directory / candidate).exists()
-                    or f"upload_{candidate}" in registry
-                ):
+                    upload_directory / candidate
+                ).exists() or f"upload_{candidate}" in registry:
                     tail = f"-{number}"
                     max_stem = 128 - len(suffix) - len("upload_") - len(tail)
                     candidate = f"{stem[:max_stem]}{tail}{suffix}"
@@ -659,7 +714,7 @@ def create_app(
     @app.get("/api/slides/{slide_id}", name="slide_metadata")
     async def slide_metadata(slide_id: str, request: Request) -> dict[str, object]:
         _, metadata = await _run_while_connected(
-            workers, request, metadata_for, slide_id
+            metadata_workers, request, metadata_for, slide_id
         )
         return _public_metadata(
             slide_id,
@@ -680,7 +735,7 @@ def create_app(
         slide_id: str,
         payload: dict[str, object],
     ) -> JSONResponse:
-        source, metadata = await workers.run(metadata_for, slide_id)
+        source, metadata = await metadata_workers.run(metadata_for, slide_id)
         try:
             x = _crop_integer(payload, "x")
             y = _crop_integer(payload, "y")
@@ -744,7 +799,7 @@ def create_app(
     @app.get("/iiif/3/{slide_id}/info.json", name="iiif_info")
     async def iiif_info(slide_id: str, request: Request) -> JSONResponse:
         _, metadata = await _run_while_connected(
-            workers, request, metadata_for, slide_id
+            metadata_workers, request, metadata_for, slide_id
         )
         width, height = metadata.dimensions
         info_url = str(request.url_for("iiif_info", slide_id=slide_id))
@@ -802,7 +857,7 @@ def create_app(
             raise HTTPException(status_code=404, detail="unknown overlay revision")
         _overlay_palette(overlay, style)
         _, metadata = await _run_while_connected(
-            workers, request, metadata_for, slide_id
+            metadata_workers, request, metadata_for, slide_id
         )
         width, height = metadata.dimensions
         info_url = str(request.url)
@@ -871,7 +926,7 @@ def create_app(
             raise HTTPException(status_code=404, detail="unknown overlay revision")
         palette = _overlay_palette(overlay, style)
         _, metadata = await _run_while_connected(
-            workers, request, metadata_for, slide_id
+            metadata_workers, request, metadata_for, slide_id
         )
         try:
             parsed_region = _parse_region(region, metadata.dimensions)
@@ -931,7 +986,7 @@ def create_app(
         if normalized_format not in ("jpg", "png"):
             raise HTTPException(status_code=400, detail="format must be jpg or png")
         source, metadata = await _run_while_connected(
-            workers, request, metadata_for, slide_id
+            metadata_workers, request, metadata_for, slide_id
         )
         try:
             parsed_region = _parse_region(region, metadata.dimensions)

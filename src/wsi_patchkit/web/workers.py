@@ -7,6 +7,7 @@ import queue
 import threading
 from collections.abc import Callable
 from concurrent.futures import Future
+from contextlib import suppress
 from dataclasses import dataclass
 from typing import Any, TypeVar
 
@@ -19,14 +20,19 @@ class _WorkItem:
     function: Callable[..., Any]
     args: tuple[Any, ...]
     kwargs: dict[str, Any]
+    loop: asyncio.AbstractEventLoop
 
 
 class TileWorkerPool:
     """Run blocking tile work without blocking the ASGI event loop."""
 
-    def __init__(self, size: int = 4) -> None:
+    def __init__(self, size: int = 4, *, max_pending: int | None = None) -> None:
         if size < 1:
             raise ValueError("tile worker count must be positive")
+        limit = size * 4 if max_pending is None else max_pending
+        if limit < 1:
+            raise ValueError("max_pending must be positive")
+        self._slots = asyncio.Semaphore(limit)
         self._queue: queue.Queue[_WorkItem | None] = queue.Queue()
         self._closed = False
         self._state_lock = threading.Lock()
@@ -52,11 +58,23 @@ class TileWorkerPool:
         *args: object,
         **kwargs: object,
     ) -> T:
+        # Backpressure before creating/queuing a work item. Disconnected clients
+        # can cancel this wait without leaving any obsolete work in the queue.
+        await self._slots.acquire()
         future: Future[T] = Future()
         with self._state_lock:
             if self._closed:
+                self._slots.release()
                 raise RuntimeError("tile worker pool is closed")
-            self._queue.put(_WorkItem(future, function, args, kwargs))
+            self._queue.put(
+                _WorkItem(
+                    future,
+                    function,
+                    args,
+                    kwargs,
+                    asyncio.get_running_loop(),
+                )
+            )
         try:
             # Notify the event loop when work finishes instead of scheduling a
             # timer for every pending request every millisecond.
@@ -73,14 +91,22 @@ class TileWorkerPool:
             item = self._queue.get()
             if item is None:
                 return
-            if not item.future.set_running_or_notify_cancel():
-                continue
             try:
-                result = item.function(*item.args, **item.kwargs)
-            except BaseException as caught:
-                item.future.set_exception(caught)
-            else:
-                item.future.set_result(result)
+                if not item.future.set_running_or_notify_cancel():
+                    continue
+                try:
+                    result = item.function(*item.args, **item.kwargs)
+                except BaseException as caught:
+                    item.future.set_exception(caught)
+                else:
+                    item.future.set_result(result)
+            finally:
+                # A cancelled running read still occupies capacity until it
+                # actually finishes; cancelled queue items release on dequeue.
+                # Otherwise rapid cancellations could grow an unbounded queue.
+                # The owning event loop may have shut down during close.
+                with suppress(RuntimeError):
+                    item.loop.call_soon_threadsafe(self._slots.release)
 
     def close(self) -> None:
         with self._state_lock:

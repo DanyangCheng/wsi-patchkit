@@ -279,6 +279,62 @@ backend hooks and may need updating for future kfbslide versions.
 To compare without periodic directory discovery, launch the viewer with just
 `--slide "sample=/path/to/example.kfb"`, omitting slide directory arguments.
 
+### Viewer performance and persistent KFB indices
+
+The viewer caches one slide per reader by default (`--reader-cache-size 1`),
+with 128 decoded KFB tiles per open slide (`--kfb-tile-cache-size 128`). The
+reader count remains configurable through `--reader-pool-size`. Reducing it
+can help when storage or memory, rather than CPU, limits concurrent reads.
+
+KFB indices are streamed into SQLite in batches of 4096 records on first use.
+The default cache directory is `./.cache/kfb-index`; put it on a local SSD even
+when slides reside on a slower drive:
+
+```powershell
+uv run wsi-patchkit-viewer --slide-dir "D:\slides" --kfb-index-cache-dir "C:\wsi-cache" --reader-cache-size 1
+```
+
+Subsequent opens reuse the database and query only contributing tile records.
+Each open index keeps at most 512 records in its Python cache and requests a
+2 MiB SQLite page-cache budget. This is not a cap on total process memory:
+decoded image caches, rendering buffers, and OS file caches also use memory.
+The first database build may take longer than the previous in-memory parser;
+later opens avoid rebuilding its large Python dictionaries. Cache identity
+includes the source path, size, nanosecond modification time, parsed header
+fields, and cache schema version. Source changes create a new cache; completed
+builds and index repairs are transactional, and simultaneous builders serialize.
+Old cache files can be removed when the viewer is stopped. Corrupt cache files
+can likewise be removed to rebuild them from their unchanged source slides.
+
+The adapter preserves the backend's JPEG decoder and index repair behavior.
+It supports the private index interface of kfbslide 0.3.2/0.3.3; future backend
+versions require compatibility verification. Library readers opt in with
+`KfbSlideReader(index_cache_dir=...)` or
+`AutoSlideReader(kfb_index_cache_dir=...)`. The web app enables it by default;
+embedded applications can pass `kfb_index_cache_dir=None` to use native indices.
+Docker stores index databases in `/data/cache/kfb-index`, backed by a persistent
+writable volume in Compose.
+
+Directory scanning, metadata, and tile rendering use separate work queues.
+`--scan-interval` sets the minimum rescan interval (default: 5 seconds); browser
+polling still happens every 5 seconds. Rendering queues apply backpressure,
+and disconnected clients cancel work that has not started. The browser limits
+tile requests to four, clears unstarted jobs when the viewport changes, and
+retains at most 128 image-cache entries. Already-running synchronous reads
+finish normally. RGBA images are composited over white using Pillow, preserving
+the original integer rounding without large uint32 conversion buffers.
+
+Compare opening, working-set growth on Windows, and uncached overview rendering:
+
+```powershell
+.venv\Scripts\python.exe -u benchmarks\benchmark_web_kfb.py "D:\slides\sample.kfb" --output .cache\benchmark.json
+```
+
+The benchmark verifies exact JPEG equality between the legacy conversion and
+the optimized renderer. `sqlite_first` builds only if its source cache does not
+already exist; `index_built` reports whether a build actually happened. Native
+file-system caches are not cleared, so these are not cold-disk measurements.
+
 ## Coordinate contract
 
 Sampler coordinates live on a virtual canvas at `target_mpp`. For example, an
