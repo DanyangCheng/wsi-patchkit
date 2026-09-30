@@ -45,7 +45,7 @@ class OpenSlideReader:
         slide = self._slides.get(path)
         if slide is None:
             try:
-                slide = self._openslide.OpenSlide(path)
+                slide = self._open_slide(path)
             except self._openslide.OpenSlideError as error:
                 raise OSError(f"unable to open slide {path}: {error}") from error
             self._slides[path] = slide
@@ -55,6 +55,9 @@ class OpenSlideReader:
         else:
             self._slides.move_to_end(path)
         return slide
+
+    def _open_slide(self, path: str) -> Any:
+        return self._openslide.OpenSlide(path)
 
     def _level_downsample(
         self,

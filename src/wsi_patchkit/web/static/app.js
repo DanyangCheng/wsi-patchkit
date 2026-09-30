@@ -339,9 +339,21 @@
 
   function updateViewportStatus() {
     const item = currentItem();
-    if (!item) return;
+    if (!item || !currentSlide) return;
+    const contentSize = item.getContentSize();
+    if (contentSize.x !== currentSlide.width || contentSize.y !== currentSlide.height) {
+      zoomLabel.textContent = "缩放 —";
+      coordinateLabel.textContent = "x — · y —";
+      scale.hidden = true;
+      return;
+    }
 
     const imageZoom = item.viewportToImageZoom(viewer.viewport.getZoom(true));
+    if (!Number.isFinite(imageZoom) || imageZoom <= 0) {
+      zoomLabel.textContent = "缩放 —";
+      scale.hidden = true;
+      return;
+    }
     slider.value = String(Math.log2(imageZoom));
 
     if (!currentSlide?.mpp) {
@@ -352,6 +364,10 @@
 
     const baseMpp = (currentSlide.mpp[0] + currentSlide.mpp[1]) / 2;
     const screenMpp = baseMpp / imageZoom;
+    if (!Number.isFinite(screenMpp) || screenMpp <= 0) {
+      scale.hidden = true;
+      return;
+    }
     zoomLabel.textContent =
       `缩放 ${(imageZoom * 100).toFixed(0)}% · ${screenMpp.toFixed(3)} µm/px`;
 
@@ -628,6 +644,7 @@
       viewer.close();
       overlayItems = new Map();
     }
+    currentSlide = null;
     currentSlideLabel.textContent = record.path || slideId;
     for (const item of slideList.querySelectorAll("button")) {
       const selected = item.dataset.slideId === slideId;
@@ -646,23 +663,39 @@
     closeSlideMenu();
     showStatus(`正在打开 ${slideId}…`, true);
     coordinateLabel.textContent = "x — · y —";
+    zoomLabel.textContent = "缩放 —";
     scale.hidden = true;
     try {
-      let metadata = record;
-      if (metadata.width === undefined) {
-        const response = await fetch(`/api/slides/${encodeURIComponent(slideId)}`, {
-          signal: controller.signal,
-        });
-        if (!response.ok) throw new Error(`HTTP ${response.status}`);
-        metadata = await response.json();
-        metadata = { ...metadata, path: record.path };
-        slides.set(slideId, metadata);
-      }
+      const id = encodeURIComponent(slideId);
+      const options = { signal: controller.signal, cache: "no-store" };
+      // Fetch IIIF ourselves so old dimensions in the browser HTTP cache cannot
+      // initialize the viewer independently of the crop/MPP metadata.
+      const response = await fetch(`/api/slides/${id}`, options);
+      if (!response.ok) throw new Error(`元数据 HTTP ${response.status}`);
+      const slideMetadata = await response.json();
+      // The first request warms the server metadata cache; fetching IIIF next
+      // avoids opening a second cold reader just to obtain the same metadata.
+      const infoResponse = await fetch(`/iiif/3/${id}/info.json?metadata=2`, options);
+      if (!infoResponse.ok) throw new Error(`IIIF HTTP ${infoResponse.status}`);
+      const info = await infoResponse.json();
       if (sequence !== openSequence) return;
+      for (const dimensions of [slideMetadata, info]) {
+        if (
+          !Number.isSafeInteger(dimensions.width) || dimensions.width <= 0 ||
+          !Number.isSafeInteger(dimensions.height) || dimensions.height <= 0
+        ) {
+          throw new Error("切片尺寸无效");
+        }
+      }
+      if (info.width !== slideMetadata.width || info.height !== slideMetadata.height) {
+        throw new Error("IIIF 尺寸与切片元数据不一致");
+      }
+      const metadata = { ...slideMetadata, path: record.path };
+      slides.set(slideId, metadata);
       currentSlide = metadata;
       populateCropLevels();
       populateOverlayControls();
-      viewer.open(`/iiif/3/${encodeURIComponent(slideId)}/info.json`);
+      viewer.open(info);
     } catch (error) {
       if (error.name !== "AbortError" && sequence === openSequence) {
         showStatus(`切片加载失败：${error.message}`);
@@ -882,6 +915,7 @@
       navigatorPosition: "TOP_RIGHT",
       navigatorSizeRatio: 0.16,
       showNavigationControl: false,
+      preserveViewport: false,
       animationTime: 0.45,
       springStiffness: 8,
       zoomPerScroll: 1.25,
@@ -904,6 +938,16 @@
     });
 
     viewer.addHandler("open", () => {
+      const item = currentItem();
+      if (!item || !currentSlide) return;
+      const size = item.getContentSize();
+      if (size.x !== currentSlide.width || size.y !== currentSlide.height) {
+        viewer.close();
+        showStatus("切片加载失败：查看器尺寸与元数据不一致");
+        return;
+      }
+      viewer.viewport.goHome(true);
+      viewer.viewport.applyConstraints(true);
       hideStatus();
       updateViewportStatus();
       loadInitiallyVisibleOverlays();

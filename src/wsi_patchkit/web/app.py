@@ -18,6 +18,8 @@ from typing import TYPE_CHECKING, TypeVar
 from urllib.parse import parse_qs, quote
 from zipfile import ZIP_STORED, ZipFile
 
+from PIL import Image
+
 if TYPE_CHECKING:
     from .__main__ import SlideDirectoryScanner
 
@@ -306,6 +308,11 @@ def create_app(
             jpeg_quality=jpeg_quality,
             max_output_pixels=max_output_pixels,
         )
+    # Image.open lazily imports format plugins. Initialize them before serving
+    # requests so first tile reads do not perform imports in rendering threads.
+    _LOGGER.debug("Pillow plugin initialization BEGIN")
+    Image.init()
+    _LOGGER.debug("Pillow plugin initialization END")
     worker_count = reader_pool_size if tile_workers is None else tile_workers
     workers = TileWorkerPool(worker_count)
     overlay_workers = TileWorkerPool(max(1, worker_count // 2))
@@ -766,7 +773,9 @@ def create_app(
                 "extraQualities": ["default"],
                 "extraFeatures": ["regionByPx", "sizeByW", "sizeByWh"],
             },
-            headers={"Cache-Control": cache_control},
+            # Dimensions may change when a backend parser is corrected or a
+            # registered source is replaced. Tile bytes keep their own cache.
+            headers={"Cache-Control": "no-store"},
         )
 
     @app.get(

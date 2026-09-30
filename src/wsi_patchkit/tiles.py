@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import hashlib
+import logging
 import math
 import queue
 import threading
+import time
 from collections import OrderedDict
 from collections.abc import Callable, Iterator, Sequence
 from concurrent.futures import Future
@@ -24,6 +26,7 @@ from .types import MPP, LevelInfo, SlideMetadata, as_mpp
 
 ImageFormat = Literal["jpg", "png"]
 ReaderFactory = Callable[[], SlideReader]
+_LOGGER = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True, slots=True)
@@ -168,6 +171,7 @@ class TileRenderer:
         cache_size: int = 512,
         jpeg_quality: int = 85,
         max_output_pixels: int = 16_777_216,
+        max_read_pixels: int = 1_048_576,
     ) -> None:
         if cache_size < 0:
             raise ValueError("cache_size must be non-negative")
@@ -175,6 +179,8 @@ class TileRenderer:
             raise ValueError("jpeg_quality must be in [1, 100]")
         if max_output_pixels < 1:
             raise ValueError("max_output_pixels must be positive")
+        if max_read_pixels < 16:
+            raise ValueError("max_read_pixels must be at least 16")
         if reader is not None and reader_factory is not None:
             raise ValueError("provide reader or reader_factory, not both")
         if reader is None and reader_factory is None:
@@ -187,6 +193,7 @@ class TileRenderer:
         self.cache_size = int(cache_size)
         self.jpeg_quality = int(jpeg_quality)
         self.max_output_pixels = int(max_output_pixels)
+        self.max_read_pixels = int(max_read_pixels)
         self._cache: OrderedDict[tuple[object, ...], EncodedImage] = OrderedDict()
         self._metadata_cache: dict[tuple[object, ...], SlideMetadata] = {}
         self._inflight: dict[tuple[object, ...], Future[EncodedImage]] = {}
@@ -390,6 +397,10 @@ class TileRenderer:
     ) -> EncodedImage:
         x, y, width, height = region
         output_width, output_height = output_size
+        start = time.perf_counter()
+        _LOGGER.debug(
+            "Render BEGIN path=%s region=%s output=%s", path, region, output_size
+        )
         metadata = self.metadata(path, source_mpp=source_mpp)
         full_width, full_height = metadata.dimensions
         if x >= full_width or y >= full_height:
@@ -418,6 +429,33 @@ class TileRenderer:
             round(lx0 * level.downsample[0]),
             round(ly0 * level.downsample[1]),
         )
+        if (lx1 - lx0) * (ly1 - ly0) > self.max_read_pixels:
+            image = self._render_in_blocks(
+                path,
+                level,
+                (lx0, ly0, lx1, ly1),
+                (
+                    x / level.downsample[0],
+                    y / level.downsample[1],
+                    (x + clipped_width) / level.downsample[0],
+                    (y + clipped_height) / level.downsample[1],
+                ),
+                (rendered_width, rendered_height),
+            )
+            encoded = self._encode_image(image, image_format)
+            _LOGGER.debug(
+                "Render END path=%s elapsed=%.3fs", path, time.perf_counter() - start
+            )
+            return encoded
+        _LOGGER.debug(
+            "Read BEGIN path=%s level=%s downsample=%s location=%s size=%s",
+            path,
+            level.level,
+            level.downsample,
+            level_zero_location,
+            (lx1 - lx0, ly1 - ly0),
+        )
+        read_start = time.perf_counter()
         with self._readers.acquire() as reader:
             array = reader.read_region(
                 path,
@@ -425,6 +463,9 @@ class TileRenderer:
                 level.level,
                 (lx1 - lx0, ly1 - ly0),
             )
+        _LOGGER.debug(
+            "Read END path=%s elapsed=%.3fs", path, time.perf_counter() - read_start
+        )
         image = Image.fromarray(_as_rgb(array), "RGB")
         extent = (
             (x / level.downsample[0]) - lx0,
@@ -439,7 +480,101 @@ class TileRenderer:
             resample=Image.Resampling.BILINEAR,
         )
 
-        return self._encode_image(image, image_format)
+        encoded = self._encode_image(image, image_format)
+        _LOGGER.debug(
+            "Render END path=%s elapsed=%.3fs", path, time.perf_counter() - start
+        )
+        return encoded
+
+    def _render_in_blocks(
+        self,
+        path: str | Path,
+        level: LevelInfo,
+        bounds: tuple[int, int, int, int],
+        extent: tuple[float, float, float, float],
+        output_size: tuple[int, int],
+    ) -> Image.Image:
+        """Resample bounded native reads onto one output pixel grid.
+
+        Include both neighbors of each bilinear sample. Using the global
+        output grid keeps sampling positions consistent at block boundaries.
+        This limits temporary arrays even when the native pyramid stops far
+        above the requested overview resolution.
+        """
+        width, height = output_size
+        dx = (extent[2] - extent[0]) / width
+        dy = (extent[3] - extent[1]) / height
+        side = math.isqrt(self.max_read_pixels)
+        block_width = min(width, max(1, math.floor((side - 3) / dx) + 1))
+        block_height = min(height, max(1, math.floor((side - 3) / dy) + 1))
+        image = Image.new("RGB", output_size)
+        _LOGGER.debug(
+            "Block render path=%s level=%s output_block=%s max_read_pixels=%s",
+            path,
+            level.level,
+            (block_width, block_height),
+            self.max_read_pixels,
+        )
+        with self._readers.acquire() as reader:
+            for oy in range(0, height, block_height):
+                oh = min(block_height, height - oy)
+                ry0 = min(
+                    bounds[3] - 1,
+                    max(bounds[1], math.floor(extent[1] + (oy + 0.5) * dy - 0.5)),
+                )
+                ry1 = max(
+                    ry0 + 1,
+                    min(
+                        bounds[3],
+                        math.floor(extent[1] + (oy + oh - 0.5) * dy - 0.5) + 2,
+                    ),
+                )
+                for ox in range(0, width, block_width):
+                    ow = min(block_width, width - ox)
+                    rx0 = min(
+                        bounds[2] - 1,
+                        max(bounds[0], math.floor(extent[0] + (ox + 0.5) * dx - 0.5)),
+                    )
+                    rx1 = max(
+                        rx0 + 1,
+                        min(
+                            bounds[2],
+                            math.floor(extent[0] + (ox + ow - 0.5) * dx - 0.5) + 2,
+                        ),
+                    )
+                    location = (
+                        round(rx0 * level.downsample[0]),
+                        round(ry0 * level.downsample[1]),
+                    )
+                    size = (rx1 - rx0, ry1 - ry0)
+                    _LOGGER.debug(
+                        "Read BEGIN path=%s level=%s location=%s size=%s",
+                        path,
+                        level.level,
+                        location,
+                        size,
+                    )
+                    read_start = time.perf_counter()
+                    array = reader.read_region(path, location, level.level, size)
+                    _LOGGER.debug(
+                        "Read END path=%s elapsed=%.3fs",
+                        path,
+                        time.perf_counter() - read_start,
+                    )
+                    block = Image.fromarray(_as_rgb(array), "RGB")
+                    block = block.transform(
+                        (ow, oh),
+                        Image.Transform.EXTENT,
+                        (
+                            extent[0] + ox * dx - rx0,
+                            extent[1] + oy * dy - ry0,
+                            extent[0] + (ox + ow) * dx - rx0,
+                            extent[1] + (oy + oh) * dy - ry0,
+                        ),
+                        resample=Image.Resampling.BILINEAR,
+                    )
+                    image.paste(block, (ox, oy))
+        return image
 
     def _encode_image(
         self,

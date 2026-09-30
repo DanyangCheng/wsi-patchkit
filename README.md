@@ -219,6 +219,66 @@ level and returned with an ETag and private cache headers. By default, four
 independent readers process different tiles concurrently; tune
 `--reader-pool-size` to match available CPU, memory, and storage throughput.
 
+Large overview regions are resampled in blocks rather than materializing the
+whole native region as one array. `TileRenderer(max_read_pixels=1_048_576)`
+limits the pixels requested in each native read during `render_region()`;
+bilinear sampling uses one global output grid across blocks. The encoded
+output remains cached. This bounds temporary conversion arrays, but the
+backend's index and tile caches also consume memory, and the first overview
+still needs to decode its contributing tiles. Exact crop methods retain
+their existing direct-read behavior.
+
+`KfbSlideReader` corrects truncated tile-index offsets in kfbslide 0.3.2:
+KFB header index offsets are 64-bit values, while that backend reads their
+low 32-bit words. For files whose index lies beyond 4 GiB, this otherwise
+interprets image data as an index and produces invalid pyramid metadata.
+The adapter restores the offsets before index construction, checks that the
+index range matches the tile count and file bounds, and rejects invalid
+pyramid dimensions/downsamples. The correction does not modify the file or
+the installed package.
+
+The browser fetches slide metadata and IIIF `info.json` without caching,
+checks that their dimensions agree, and opens the fetched IIIF description.
+The base IIIF description uses `Cache-Control: no-store`; each newly opened
+slide resets the viewport to its home bounds. Rendered image tiles retain
+their separate cache policy.
+
+For a slow KFB request, run the same region through the reader and renderer
+without the web server. For example, on Windows, from the project directory:
+
+```powershell
+.venv\Scripts\python.exe -u benchmarks\diagnose_kfb.py "D:\slides\example.kfb" --region 98304,98304,32768,2315 --size 512,37
+```
+
+Use the actual slide path and the region/output size from the slow IIIF URL.
+The script prints file opening, metadata, reading, and rendering timings, plus
+the selected native level and read size. Two renders use the same reader with
+encoded response caching disabled, so the second pass measures reuse of the
+reader's internal cache. Every 15 seconds it dumps the current Python stack to
+stderr, including during a stall. A slow standalone read narrows the problem to
+the reader or storage; fast standalone renders point toward server scheduling
+or a difference in the request workload. It does not measure HTTP queue time.
+
+If standalone rendering is fast but HTTP requests stall, append
+`--debug-stack-interval 15` to the viewer command to dump all server thread
+stacks every 15 seconds. Capture a dump while the browser request is pending.
+Add `--debug-render` to log each uncached request's region, output size, selected
+native level, read size, and elapsed time. Replay the last unfinished region
+with `diagnose_kfb.py --worker-thread` to compare background thread decoding
+with the script's default main thread decoding. A quick read of one small
+region does not establish the speed of a full-slide overview or other tiles.
+The viewer initializes Pillow's image plugins before accepting requests, so
+initial plugin imports happen during startup rather than the first tile read.
+For kfbslide 0.3.x, `--debug-render` also traces uncached tile decoding and
+index repairs, delegating both operations to the installed backend. The last
+`KFB tile BEGIN` identifies the tile being decoded; `KFB repair BEGIN` records
+the original decode error and the number of subsequent offsets involved.
+Use `diagnose_kfb.py --trace-tiles --preload-pillow --worker-thread` to collect
+the same details without HTTP requests. These tile diagnostics use private
+backend hooks and may need updating for future kfbslide versions.
+To compare without periodic directory discovery, launch the viewer with just
+`--slide "sample=/path/to/example.kfb"`, omitting slide directory arguments.
+
 ## Coordinate contract
 
 Sampler coordinates live on a virtual canvas at `target_mpp`. For example, an

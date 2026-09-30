@@ -359,6 +359,7 @@ async def test_viewer_serves_metadata_tiles_and_frontend(tmp_path: Path) -> None
     assert metadata.status_code == 200
     assert metadata.json()["mpp"] == [0.25, 0.25]
     assert info.status_code == 200
+    assert info.headers["cache-control"] == "no-store"
     assert info.json()["width"] == 20
     assert info.json()["tiles"][0]["scaleFactors"] == [1, 2, 4]
     assert tile.status_code == 200
@@ -368,7 +369,7 @@ async def test_viewer_serves_metadata_tiles_and_frontend(tmp_path: Path) -> None
     assert index.status_code == 200
     assert "WSI PatchKit Viewer" in index.text
     assert "/static/styles.css?v=13" in index.text
-    assert "/static/app.js?v=17" in index.text
+    assert "/static/app.js?v=18" in index.text
     assert script.status_code == 200
     assert "dragToPan" in script.text
     assert "populateSlideMenu" in script.text

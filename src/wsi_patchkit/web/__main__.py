@@ -3,7 +3,11 @@
 from __future__ import annotations
 
 import argparse
+import faulthandler
+import logging
+import math
 import re
+import sys
 import threading
 import time
 from collections.abc import Iterable, Mapping
@@ -233,6 +237,18 @@ def main() -> None:
     parser.add_argument("--tile-size", default=512, type=int)
     parser.add_argument("--reader-pool-size", default=4, type=int)
     parser.add_argument(
+        "--debug-render",
+        action="store_true",
+        help="log actual render regions, native read sizes, and elapsed times",
+    )
+    parser.add_argument(
+        "--debug-stack-interval",
+        type=float,
+        default=0,
+        metavar="SECONDS",
+        help="dump all Python thread stacks periodically (0 disables; diagnostic use)",
+    )
+    parser.add_argument(
         "--overlay",
         action="append",
         default=[],
@@ -280,6 +296,8 @@ def main() -> None:
         help="number of background crop workers (default: 1)",
     )
     args = parser.parse_args()
+    if not math.isfinite(args.debug_stack_interval) or args.debug_stack_interval < 0:
+        parser.error("--debug-stack-interval must be finite and non-negative")
     if args.max_upload_gb < 1:
         parser.error("--max-upload-gb must be positive")
 
@@ -290,6 +308,15 @@ def main() -> None:
 
     from .app import create_app
     from .overlays import load_indexed_overlay_manifest
+
+    if args.debug_render:
+        render_logger = logging.getLogger("wsi_patchkit")
+        handler = logging.StreamHandler(sys.stderr)
+        handler.setFormatter(
+            logging.Formatter("%(asctime)s %(threadName)s %(message)s")
+        )
+        render_logger.addHandler(handler)
+        render_logger.setLevel(logging.DEBUG)
 
     explicit_slides = dict(args.slide or [])
     directories = [*args.slide_dir, *args.slides]
@@ -350,7 +377,16 @@ def main() -> None:
         crop_workers=args.crop_workers,
         slide_scanner=scanner if directories else None,
     )
-    uvicorn.run(app, host=args.host, port=args.port)
+    if args.debug_stack_interval:
+        faulthandler.enable(file=sys.stderr)
+        faulthandler.dump_traceback_later(
+            args.debug_stack_interval, repeat=True, file=sys.stderr
+        )
+    try:
+        uvicorn.run(app, host=args.host, port=args.port)
+    finally:
+        if args.debug_stack_interval:
+            faulthandler.cancel_dump_traceback_later()
 
 
 if __name__ == "__main__":
