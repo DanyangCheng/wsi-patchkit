@@ -166,8 +166,7 @@ def test_manifest_loads_indexed_fragment_and_rejects_escaping_paths(
         load_indexed_overlay_manifest(manifest)
 
 
-def test_overlay_cache_token_changes_when_prediction_is_replaced(tmp_path: Path)\
-    -> None:
+def test_overlay_cache_token_changes_when_prediction_is_replaced(tmp_path: Path):
     overlay = _overlay(tmp_path)
     before = overlay.public_metadata()["revision"]
     prediction = overlay.fragments[0].source.path

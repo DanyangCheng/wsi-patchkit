@@ -445,14 +445,14 @@ wheels = [
 
 [[package]]
 name = "kfbslide"
-version = "0.3.2"
+version = "0.3.3"
 source = { registry = "https://mirrors.aliyun.com/pypi/simple/" }
 dependencies = [
     { name = "pillow" },
 ]
-sdist = { url = "https://mirrors.aliyun.com/pypi/packages/4e/9f/786c0295bd339757a4206b36d0202b09cc9b2794df807902775f6727eb27/kfbslide-0.3.2.tar.gz", hash = "sha256:3b07960f4086bb11fffb3de8be0311600a57abeb506a830157726a9a600d33a5" }
+sdist = { url = "https://mirrors.aliyun.com/pypi/packages/b1/2f/4cf44708586ead17d68942baa6198f619aedcd5cc19f820ca1185dd5245c/kfbslide-0.3.3.tar.gz", hash = "sha256:ebfb7b0a815f22197cdff453752a5a2a3c101a1b1816520a843cad951d43ba07" }
 wheels = [
-    { url = "https://mirrors.aliyun.com/pypi/packages/52/6e/1a6841e73ba5b278ebc7dd75fe735119ded1c16cacd684ca629171015837/kfbslide-0.3.2-py3-none-any.whl", hash = "sha256:239e49c41bd8424a930b806ca1e228664519123eb107efbe98443278364b0cd3" },
+    { url = "https://mirrors.aliyun.com/pypi/packages/5a/47/0c54d9b0b1a12243c75f35ed8e6f953fd47a3a4b5c4df9e21d07c897697b/kfbslide-0.3.3-py3-none-any.whl", hash = "sha256:3dd3479117a65cf4d0b68ffa12f4c8e852390869b3a9d307b90ef5415fada626" },
 ]
 
 [[package]]
@@ -2102,7 +2102,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "fastapi", marker = "extra == 'web'", specifier = ">=0.115" },
-    { name = "kfbslide", specifier = ">=0.3.2" },
+    { name = "kfbslide", specifier = "==0.3.3" },
     { name = "numpy", specifier = ">=1.26" },
     { name = "openslide-bin", specifier = ">=4.0" },
     { name = "openslide-python", specifier = ">=1.3" },
