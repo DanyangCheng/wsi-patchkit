@@ -49,6 +49,138 @@
   let cropActive = false;
   let cropOverlayAdded = false;
   let overlayItems = new Map();
+  const detectionItems = new Map();
+  let detectionTimer = null;
+
+  function clearDetections() {
+    window.clearTimeout(detectionTimer);
+    for (const entry of detectionItems.values()) {
+      entry.controller?.abort();
+      entry.canvas.remove();
+    }
+    detectionItems.clear();
+  }
+
+  function detectionZoom() {
+    const item = currentItem();
+    if (!item || !currentSlide?.mpp) return null;
+    const zoom = item.viewportToImageZoom(viewer.viewport.getZoom(true));
+    const level = currentSlide.levels[Math.min(1, currentSlide.levels.length - 1)];
+    const threshold = Math.min(...level.downsample);
+    return Number.isFinite(zoom) && zoom > 0 && 1 / zoom <= threshold * (1 + 1e-6)
+      ? zoom : null;
+  }
+
+  function drawDetections(entry) {
+    const canvas = entry.canvas;
+    const width = viewer.container.clientWidth;
+    const height = viewer.container.clientHeight;
+    const ratio = window.devicePixelRatio || 1;
+    canvas.width = Math.round(width * ratio);
+    canvas.height = Math.round(height * ratio);
+    canvas.style.width = `${width}px`;
+    canvas.style.height = `${height}px`;
+    const context = canvas.getContext("2d");
+    context.setTransform(ratio, 0, 0, ratio, 0, 0);
+    const item = currentItem();
+    if (!entry.checkbox.checked || !detectionZoom() || !item) return;
+    const radius = Number(entry.radius.value);
+    // The image-to-screen map is affine. Compute it once per frame rather than
+    // invoking OpenSeadragon's coordinate helpers for every nucleus.
+    const origin = item.imageToViewerElementCoordinates(new OpenSeadragon.Point(0, 0));
+    const unitX = item.imageToViewerElementCoordinates(new OpenSeadragon.Point(1, 0));
+    const unitY = item.imageToViewerElementCoordinates(new OpenSeadragon.Point(0, 1));
+    const groups = new Map(entry.settings.map((s) => [s.item.id, []]));
+    for (const [classId, x, y] of entry.points) {
+      const px = x / currentSlide.mpp[0];
+      const py = y / currentSlide.mpp[1];
+      const point = {
+        x: origin.x + px * (unitX.x - origin.x) + py * (unitY.x - origin.x),
+        y: origin.y + px * (unitX.y - origin.y) + py * (unitY.y - origin.y),
+      };
+      if (point.x >= -radius && point.y >= -radius &&
+          point.x <= width + radius && point.y <= height + radius) {
+        groups.get(classId)?.push(point);
+      }
+    }
+    for (const setting of entry.settings) {
+      if (!setting.visible) continue;
+      context.globalAlpha = Number(entry.opacity.value) * setting.alpha / 255;
+      context.fillStyle = context.strokeStyle = `rgb(${setting.color.join(",")})`;
+      context.lineWidth = 1.5;
+      context.beginPath();
+      for (const p of groups.get(setting.item.id)) {
+        context.moveTo(p.x + radius, p.y);
+        context.arc(p.x, p.y, radius, 0, Math.PI * 2);
+      }
+      if (entry.shape.value === "hollow") context.stroke();
+      else context.fill();
+    }
+  }
+
+  async function fetchDetections(entry) {
+    entry.controller?.abort();
+    if (!entry.checkbox.checked || !detectionZoom()) return;
+    const controller = new AbortController();
+    entry.controller = controller;
+    const slide = currentSlide;
+    const item = currentItem();
+    const zoom = detectionZoom();
+    const rect = item.viewportToImageRectangle(viewer.viewport.getBounds(true));
+    const padding = 32 / zoom;
+    const queryBounds = [
+      Math.max(0, rect.x - padding) * slide.mpp[0],
+      Math.max(0, rect.y - padding) * slide.mpp[1],
+      Math.min(slide.width, rect.x + rect.width + padding) * slide.mpp[0],
+      Math.min(slide.height, rect.y + rect.height + padding) * slide.mpp[1],
+    ];
+    entry.points = [];
+    drawDetections(entry);
+    if (queryBounds[0] >= queryBounds[2] || queryBounds[1] >= queryBounds[3]) return;
+    entry.status.textContent = "正在加载局部检测点…";
+    try {
+      let cursor = 0;
+      do {
+        const params = new URLSearchParams({
+          bounds_um: queryBounds.join(","), downsample: String(1 / zoom),
+          revision: entry.record.revision, after: String(cursor), limit: "10000",
+        });
+        const response = await fetch(
+          `/api/slides/${encodeURIComponent(slide.id)}/detections/` +
+          `${encodeURIComponent(entry.record.id)}/points?${params}`,
+          { signal: controller.signal },
+        );
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        const result = await response.json();
+        if (controller.signal.aborted || currentSlide !== slide) return;
+        entry.points.push(...result.points);
+        cursor = result.next_cursor;
+        // Draw after all pages arrive, avoiding repeated full redraws in dense regions.
+      } while (cursor !== null);
+      drawDetections(entry);
+      entry.status.textContent = `局部 ${entry.points.length.toLocaleString()} 个点`;
+    } catch (error) {
+      if (error.name !== "AbortError" && !controller.signal.aborted && currentSlide === slide) {
+        entry.status.textContent = `检测点加载失败：${error.message}`;
+      }
+    }
+  }
+
+  function updateDetections() {
+    window.clearTimeout(detectionTimer);
+    for (const entry of detectionItems.values()) {
+      entry.controller?.abort();
+      if (!detectionZoom() || !entry.checkbox.checked) {
+        entry.points = [];
+        entry.status.textContent = entry.checkbox.checked
+          ? "放大至 Level 0–1 显示检测点" : "检测图层已关闭";
+      }
+      drawDetections(entry);
+    }
+    detectionTimer = window.setTimeout(() => {
+      for (const entry of detectionItems.values()) fetchDetections(entry);
+    }, 120);
+  }
 
   function makePanelMovable(panel) {
     const handle = panel.querySelector("[data-panel-drag-handle]");
@@ -244,6 +376,11 @@
           .join(""),
       ).join("");
       const updateOverlay = () => {
+        if (record.encoding === "objects") {
+          const entry = detectionItems.get(record.id);
+          if (entry) drawDetections(entry);
+          return;
+        }
         if (checkbox.checked) loadOverlay(record, Number(opacity.value), styleValue());
       };
       const classActions = document.createElement("div");
@@ -302,11 +439,19 @@
       }
 
       checkbox.addEventListener("change", () => {
+        if (record.encoding === "objects") {
+          updateDetections();
+          return;
+        }
         const value = Number(opacity.value);
         if (checkbox.checked) loadOverlay(record, value, styleValue());
         else setOverlayOpacity(record.id, 0);
       });
       opacity.addEventListener("input", () => {
+        if (record.encoding === "objects") {
+          updateOverlay();
+          return;
+        }
         if (checkbox.checked) {
           const value = Number(opacity.value);
           loadOverlay(record, value, styleValue());
@@ -314,6 +459,47 @@
         }
       });
       row.append(header, opacityLabel, classActions, legend);
+      if (record.encoding === "objects") {
+        const radiusLabel = document.createElement("label");
+        radiusLabel.className = "overlay-opacity";
+        radiusLabel.textContent = "圆半径（屏幕 px）";
+        const radius = document.createElement("input");
+        radius.type = "number";
+        radius.min = "1";
+        radius.max = "24";
+        radius.step = "0.5";
+        radius.value = "4";
+        radiusLabel.append(radius);
+        const shapeLabel = document.createElement("label");
+        shapeLabel.className = "overlay-opacity";
+        shapeLabel.textContent = "圆样式";
+        const shape = document.createElement("select");
+        for (const [value, name] of [["filled", "实心"], ["hollow", "空心"]]) {
+          const option = document.createElement("option");
+          option.value = value;
+          option.textContent = name;
+          shape.append(option);
+        }
+        shapeLabel.append(shape);
+        const status = document.createElement("small");
+        status.className = "detection-status";
+        status.textContent = "放大至 Level 0–1 显示检测点";
+        const canvas = document.createElement("canvas");
+        canvas.className = "detection-canvas";
+        canvas.setAttribute("aria-hidden", "true");
+        viewer.canvas.append(canvas);
+        detectionItems.set(record.id, {
+          record, checkbox, opacity, radius, shape, status, canvas,
+          settings: classSettings, points: [], controller: null,
+        });
+        radius.addEventListener("change", () => {
+          const value = Number(radius.value);
+          radius.value = String(Number.isFinite(value) ? Math.max(1, Math.min(24, value)) : 4);
+          updateOverlay();
+        });
+        shape.addEventListener("change", updateOverlay);
+        row.append(radiusLabel, shapeLabel, status);
+      }
       return row;
     });
     overlayList.replaceChildren(...rows);
@@ -321,6 +507,7 @@
 
   function loadInitiallyVisibleOverlays() {
     for (const record of currentSlide?.overlays || []) {
+      if (record.encoding === "objects") continue;
       if (record.initially_visible) {
         const style = (record.classes || []).map((item) =>
           item.rgba.map((channel) => channel.toString(16).padStart(2, "0")).join(""),
@@ -328,6 +515,7 @@
         loadOverlay(record, Number(record.default_opacity ?? 0.7), style);
       }
     }
+    updateDetections();
   }
 
   function niceScaleLength(targetMicrometres) {
@@ -634,6 +822,7 @@
     const record = slides.get(slideId);
     if (!record) return;
     const sequence = ++openSequence;
+    clearDetections();
     slideRequestController?.abort();
     const controller = new AbortController();
     slideRequestController = controller;
@@ -957,6 +1146,8 @@
       showStatus(`切片加载失败：${event.message || "未知错误"}`);
     });
     viewer.addHandler("viewport-change", updateViewportStatus);
+    viewer.addHandler("viewport-change", updateDetections);
+    viewer.addHandler("resize", updateDetections);
     const updatePointerCoordinates = (event) => {
       const item = currentItem();
       if (!item || !currentSlide) return;

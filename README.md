@@ -167,6 +167,16 @@ binary coverage TIFF distinguishes a valid class (including class zero) from a
 region that was never predicted. See the complete
 [Segment prediction-mask contract](docs/SEGMENT_PREDICTION_MASK_CONTRACT.md).
 
+The upstream contract for nucleus-center and box detections is in
+[Detection prediction contract](docs/DETECTION_PREDICTION_CONTRACT.md).
+Detection manifests use the same `--overlay` and `--overlay-root` options.
+The viewer imports JSONL records into a temporary disk-backed SQLite R-tree and
+queries the visible region for Canvas point rendering. Points appear only at
+native level 0–1 resolutions or higher zoom; lower zoom clears the layer and
+stops point queries. Box-only records use their box center. Layer controls
+adjust class colors, visibility, opacity, screen-space radius (1–24 px), and
+filled or hollow circles. Boxes and instance contours are not drawn.
+
 Register a manifest from the CLI:
 
 ```bash

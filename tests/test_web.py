@@ -270,11 +270,13 @@ def test_discover_overlays_uses_manifest_ids_and_source_stem_aliases(
     unmatched = overlay_root / "other_prediction"
     matching.mkdir(parents=True)
     unmatched.mkdir()
-    (matching / "prediction.json").touch()
-    (unmatched / "prediction.json").touch()
+    for directory in (matching, unmatched):
+        (directory / "prediction.json").write_text(
+            '{"schema":"wsi-patchkit-overlay/v1"}', encoding="utf-8"
+        )
 
-    # Loading is intentionally mocked here: discovery owns root traversal and
-    # manifest-to-slide routing; schema validation is covered in test_overlays.
+    # Discovery reads the schema discriminator. Full raster loading is mocked:
+    # routing is tested here and validation is covered in test_overlays.
     import wsi_patchkit.web.overlays as overlay_module
 
     class Manifest:

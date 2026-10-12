@@ -36,6 +36,7 @@ from ..io import AutoSlideReader, SlideReader
 from ..tiles import TileRenderer, iiif_scale_factors
 from ..types import SlideMetadata
 from .crops import CropJobQueue
+from .detections import DetectionOverlay, bounds
 from .overlays import RGBA, IndexedOverlay, OverlayRegistry, OverlayRenderer
 from .registry import SlideRegistry, SlideSource, valid_public_id
 from .workers import TileWorkerPool
@@ -84,9 +85,10 @@ def _overlay_palette(
 ) -> dict[int, RGBA] | None:
     if style is None:
         return None
-    if len(style) != 8 * len(overlay.classes) or re.fullmatch(
-        r"[0-9a-fA-F]+", style
-    ) is None:
+    if (
+        len(style) != 8 * len(overlay.classes)
+        or re.fullmatch(r"[0-9a-fA-F]+", style) is None
+    ):
         raise HTTPException(status_code=400, detail="invalid overlay palette")
     palette: dict[int, RGBA] = {}
     for index, item in enumerate(overlay.classes):
@@ -126,7 +128,7 @@ def _public_metadata(
     slide_id: str,
     metadata: SlideMetadata,
     *,
-    overlays: Mapping[str, IndexedOverlay] | None = None,
+    overlays: Mapping[str, IndexedOverlay | DetectionOverlay] | None = None,
 ) -> dict[str, object]:
     return {
         "id": slide_id,
@@ -235,7 +237,7 @@ def create_app(
     *,
     overlays: Mapping[
         str,
-        Mapping[str, IndexedOverlay | str | Path],
+        Mapping[str, IndexedOverlay | DetectionOverlay | str | Path],
     ]
     | None = None,
     manifest_slide_id_aliases: Mapping[str, str] | None = None,
@@ -283,9 +285,7 @@ def create_app(
             uploaded_sources[slide_id] = SlideSource(path)
         except (OSError, ValueError):
             _LOGGER.warning("Skipping invalid uploaded slide %s", path)
-    registry = SlideRegistry(
-        {**initial_slides, **uploaded_sources}, allow_empty=True
-    )
+    registry = SlideRegistry({**initial_slides, **uploaded_sources}, allow_empty=True)
     upload_lock = asyncio.Lock()
     overlay_registry = OverlayRegistry(
         overlays,
@@ -333,6 +333,7 @@ def create_app(
         crop_jobs.close()
         overlay_workers.close()
         overlay_renderer.close()
+        overlay_registry.close()
         workers.close()
         renderer.close()
 
@@ -389,7 +390,9 @@ def create_app(
         height = min(16, metadata.dimensions[1])
         renderer.render_region(path, (0, 0, width, height), (width, height))
 
-    def overlay_for(slide_id: str, overlay_id: str) -> IndexedOverlay:
+    def overlay_for(
+        slide_id: str, overlay_id: str
+    ) -> IndexedOverlay | DetectionOverlay:
         source_for(slide_id)
         try:
             return overlay_registry.get(slide_id, overlay_id)
@@ -608,7 +611,8 @@ def create_app(
             raise HTTPException(status_code=413, detail="slide upload is too large")
         upload_directory.mkdir(parents=True, exist_ok=True)
         descriptor, temporary_name = tempfile.mkstemp(
-            prefix=".upload-", suffix=Path(safe_name).suffix,
+            prefix=".upload-",
+            suffix=Path(safe_name).suffix,
             dir=upload_directory,
         )
         temporary_path = Path(temporary_name)
@@ -638,9 +642,8 @@ def create_app(
                 candidate = safe_name
                 number = 2
                 while (
-                    (upload_directory / candidate).exists()
-                    or f"upload_{candidate}" in registry
-                ):
+                    upload_directory / candidate
+                ).exists() or f"upload_{candidate}" in registry:
                     tail = f"-{number}"
                     max_stem = 128 - len(suffix) - len("upload_") - len(tail)
                     candidate = f"{stem[:max_stem]}{tail}{suffix}"
@@ -674,6 +677,43 @@ def create_app(
             overlay.public_metadata()
             for overlay in overlay_registry.for_slide(slide_id).values()
         ]
+
+    @app.get("/api/slides/{slide_id}/detections/{overlay_id}/points")
+    async def detection_points(
+        slide_id: str,
+        overlay_id: str,
+        request: Request,
+        bounds_um: str,
+        downsample: float,
+        revision: str,
+        after: int = 0,
+        limit: int = 10000,
+    ) -> JSONResponse:
+        overlay = overlay_for(slide_id, overlay_id)
+        if not isinstance(overlay, DetectionOverlay):
+            raise HTTPException(
+                status_code=400, detail="overlay is not a detection layer"
+            )
+        if revision != overlay.cache_token:
+            raise HTTPException(status_code=404, detail="unknown detection revision")
+        try:
+            box = bounds([float(v) for v in bounds_um.split(",")])
+            if not math.isfinite(downsample) or downsample <= 0:
+                raise ValueError("downsample must be finite and positive")
+            if after < 0 or not 1 <= limit <= 20000:
+                raise ValueError("invalid cursor or limit")
+        except ValueError as error:
+            raise HTTPException(status_code=400, detail=str(error)) from error
+        _, metadata = await _run_while_connected(
+            workers, request, metadata_for, slide_id
+        )
+        threshold = min(metadata.levels[min(1, len(metadata.levels) - 1)].downsample)
+        if downsample > threshold * (1 + 1e-6):
+            return JSONResponse({"points": [], "next_cursor": None, "suppressed": True})
+        result = await _run_while_connected(
+            overlay_workers, request, overlay.query, box, after, limit
+        )
+        return JSONResponse(result, headers={"Cache-Control": cache_control})
 
     @app.post("/api/slides/{slide_id}/crops", name="save_crop")
     async def save_slide_crop(
@@ -798,6 +838,10 @@ def create_app(
         revision: str | None = None,
     ) -> JSONResponse:
         overlay = overlay_for(slide_id, overlay_id)
+        if isinstance(overlay, DetectionOverlay):
+            raise HTTPException(
+                status_code=400, detail="detections use the local points API"
+            )
         if revision is not None and revision != overlay.cache_token:
             raise HTTPException(status_code=404, detail="unknown overlay revision")
         _overlay_palette(overlay, style)
@@ -869,6 +913,10 @@ def create_app(
         overlay = overlay_for(slide_id, overlay_id)
         if revision is not None and revision != overlay.cache_token:
             raise HTTPException(status_code=404, detail="unknown overlay revision")
+        if isinstance(overlay, DetectionOverlay):
+            raise HTTPException(
+                status_code=400, detail="detections use the local points API"
+            )
         palette = _overlay_palette(overlay, style)
         _, metadata = await _run_while_connected(
             workers, request, metadata_for, slide_id

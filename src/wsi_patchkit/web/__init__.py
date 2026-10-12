@@ -2,6 +2,7 @@
 
 from .app import create_app
 from .crops import CropJobQueue
+from .detections import DetectionOverlay, load_detection_overlay_manifest
 from .overlays import (
     BinaryRasterSource,
     IndexedOverlay,
@@ -12,11 +13,15 @@ from .overlays import (
     OverlayRenderer,
     TiffRasterSource,
     load_indexed_overlay_manifest,
+    load_overlay_manifest,
 )
 from .registry import SlideRegistry, SlideSource
 from .workers import TileWorkerPool
 
 __all__ = [
+    "DetectionOverlay",
+    "load_detection_overlay_manifest",
+    "load_overlay_manifest",
     "CropJobQueue",
     "BinaryRasterSource",
     "IndexedOverlay",

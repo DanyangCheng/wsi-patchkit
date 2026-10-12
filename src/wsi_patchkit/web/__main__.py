@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import faulthandler
+import json
 import logging
 import math
 import re
@@ -176,6 +177,7 @@ def discover_overlays(
     predictions for more slides than the current viewer exposes.
     """
     from .overlays import load_indexed_overlay_manifest
+    from .registry import valid_public_id
 
     registered = set(slide_ids)
     aliases = dict(slide_id_aliases or {})
@@ -189,22 +191,32 @@ def discover_overlays(
             key=lambda path: path.relative_to(directory).as_posix().casefold(),
         )
         for manifest in manifests:
-            overlay = load_indexed_overlay_manifest(manifest)
+            payload = json.loads(manifest.read_text(encoding="utf-8"))
+            if (
+                isinstance(payload, dict)
+                and payload.get("schema") == "wsi-patchkit-detection/v1"
+            ):
+                # Import records once, when OverlayRegistry registers this path.
+                manifest_id = valid_public_id(payload.get("slide_id"), name="slide ID")
+                overlay_id = valid_public_id(
+                    payload.get("overlay_id"), name="overlay ID"
+                )
+            else:
+                overlay = load_indexed_overlay_manifest(manifest)
+                manifest_id, overlay_id = overlay.slide_id, overlay.overlay_id
             slide_id = (
-                overlay.slide_id
-                if overlay.slide_id in registered
-                else aliases.get(overlay.slide_id)
+                manifest_id if manifest_id in registered else aliases.get(manifest_id)
             )
             if slide_id not in registered:
                 continue
             slide_overlays = overlays.setdefault(slide_id, {})
-            if overlay.overlay_id in slide_overlays:
-                previous = slide_overlays[overlay.overlay_id]
+            if overlay_id in slide_overlays:
+                previous = slide_overlays[overlay_id]
                 raise ValueError(
-                    f"duplicate overlay {overlay.overlay_id!r} for slide "
+                    f"duplicate overlay {overlay_id!r} for slide "
                     f"{slide_id!r}: {previous} and {manifest}"
                 )
-            slide_overlays[overlay.overlay_id] = manifest
+            slide_overlays[overlay_id] = manifest
     return overlays
 
 
@@ -254,7 +266,7 @@ def main() -> None:
         default=[],
         type=Path,
         metavar="MANIFEST.json",
-        help="register a wsi-patchkit-overlay/v1 manifest; repeatable",
+        help="register an indexed or detection prediction manifest; repeatable",
     )
     parser.add_argument(
         "--overlay-root",
@@ -307,7 +319,7 @@ def main() -> None:
         raise SystemExit("Install the viewer with: uv sync --extra web") from error
 
     from .app import create_app
-    from .overlays import load_indexed_overlay_manifest
+    from .overlays import load_overlay_manifest
 
     if args.debug_render:
         render_logger = logging.getLogger("wsi_patchkit")
@@ -328,7 +340,7 @@ def main() -> None:
     overlays: dict[str, dict[str, object]] = {}
     try:
         for manifest in args.overlay:
-            overlay = load_indexed_overlay_manifest(manifest)
+            overlay = load_overlay_manifest(manifest)
             slide_overlays = overlays.setdefault(overlay.slide_id, {})
             if overlay.overlay_id in slide_overlays:
                 parser.error(
@@ -345,9 +357,7 @@ def main() -> None:
                 # An ambiguous source stem must not silently select a slide.
                 slide_id[stem] = None
         manifest_slide_id_aliases = {
-            stem: id
-            for stem, id in slide_id.items()
-            if id is not None
+            stem: id for stem, id in slide_id.items() if id is not None
         }
         discovered_overlays = discover_overlays(
             args.overlay_root,

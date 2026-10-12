@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Added detection-manifest registration, disk-backed spatial indexing, and
+  high-magnification local point rendering with adjustable radius, class
+  colors, filled/hollow styles, and opacity.
+
 - Added browser slide upload with validation, immediate listing, persistent
   server-side storage, and a dedicated Docker volume.
 - Renamed domain-level sampling APIs to `*PatchRequestSampler` and the PyTorch
