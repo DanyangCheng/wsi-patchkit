@@ -14,7 +14,10 @@ import time
 from collections.abc import Iterable, Mapping
 from pathlib import Path
 
-SLIDE_EXTENSIONS = frozenset(
+from ..io.image import IMAGE_EXTENSIONS
+from ..types import MPP, as_mpp
+
+SLIDE_EXTENSIONS = IMAGE_EXTENSIONS | frozenset(
     {
         ".bif",
         ".kfb",
@@ -36,6 +39,16 @@ def _slide(value: str) -> tuple[str, Path]:
     if not separator or not slide_id or not path:
         raise argparse.ArgumentTypeError("slides must use ID=/path/to/slide.svs")
     return slide_id, Path(path)
+
+
+def _source_mpp(value: str) -> MPP:
+    try:
+        parts = tuple(float(item) for item in value.split(","))
+        return as_mpp(parts[0] if len(parts) == 1 else parts, name="source_mpp")
+    except ValueError as error:
+        raise argparse.ArgumentTypeError(
+            "source MPP must be a positive number or X,Y pair in micrometers/pixel"
+        ) from error
 
 
 def _unique_slide_id(relative_path: Path, existing: set[str]) -> str:
@@ -246,6 +259,12 @@ def main() -> None:
     )
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", default=8000, type=int)
+    parser.add_argument(
+        "--source-mpp",
+        type=_source_mpp,
+        metavar="MPP|X,Y",
+        help="override source resolution in micrometers/pixel for served images",
+    )
     parser.add_argument("--tile-size", default=512, type=int)
     parser.add_argument("--reader-pool-size", default=4, type=int)
     parser.add_argument(
@@ -377,6 +396,7 @@ def main() -> None:
 
     app = create_app(
         slides,
+        source_mpp=args.source_mpp,
         overlays=overlays,
         manifest_slide_id_aliases=manifest_slide_id_aliases,
         tile_size=args.tile_size,

@@ -33,8 +33,9 @@ except ImportError as error:  # pragma: no cover - exercised without the web ext
     ) from error
 
 from ..io import AutoSlideReader, SlideReader
+from ..io.image import IMAGE_EXTENSIONS
 from ..tiles import TileRenderer, iiif_scale_factors
-from ..types import SlideMetadata
+from ..types import MPP, SlideMetadata, as_mpp
 from .crops import CropJobQueue
 from .detections import DetectionOverlay, bounds
 from .overlays import RGBA, IndexedOverlay, OverlayRegistry, OverlayRenderer
@@ -53,7 +54,7 @@ _INDEX_HTML = (_STATIC_DIR / "index.html").read_text(encoding="utf-8")
 _CROPS_HTML = (_STATIC_DIR / "crops.html").read_text(encoding="utf-8")
 _CROP_FILENAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,199}$")
 _CROP_IMAGE_EXTENSIONS = frozenset({".jpg", ".jpeg", ".png"})
-_UPLOAD_EXTENSIONS = frozenset(
+_UPLOAD_EXTENSIONS = IMAGE_EXTENSIONS | frozenset(
     {
         ".bif",
         ".btf",
@@ -244,6 +245,7 @@ def create_app(
     reader: SlideReader | None = None,
     reader_factory: Callable[[], SlideReader] | None = None,
     reader_pool_size: int = 4,
+    source_mpp: MPP | float | None = None,
     tile_workers: int | None = None,
     tile_size: int = 256,
     cache_size: int = 512,
@@ -265,6 +267,7 @@ def create_app(
         raise ValueError("crop_workers must be positive")
     if max_upload_bytes < 1:
         raise ValueError("max_upload_bytes must be positive")
+    default_mpp = None if source_mpp is None else as_mpp(source_mpp, name="source_mpp")
     upload_directory = Path(upload_dir).expanduser().resolve()
     if upload_directory.exists() and not upload_directory.is_dir():
         raise NotADirectoryError(upload_directory)
@@ -360,9 +363,12 @@ def create_app(
 
     def source_for(slide_id: str) -> SlideSource:
         try:
-            return registry[slide_id]
+            source = registry[slide_id]
         except KeyError as error:
             raise HTTPException(status_code=404, detail="unknown slide") from error
+        if source.source_mpp is None and default_mpp is not None:
+            return SlideSource(source.path, source_mpp=default_mpp)
+        return source
 
     def metadata_for(slide_id: str) -> tuple[SlideSource, SlideMetadata]:
         source = source_for(slide_id)
@@ -380,15 +386,20 @@ def create_app(
             except ValueError as error:
                 raise HTTPException(
                     status_code=422,
-                    detail="registered overlay is incompatible with its slide",
+                    detail=(
+                        f"registered overlay {overlay.overlay_id!r} is incompatible "
+                        f"with its slide: {error}"
+                    ),
                 ) from error
         return source, metadata
 
     def validate_uploaded_slide(path: Path) -> None:
-        metadata = renderer.metadata(path)
+        metadata = renderer.metadata(path, source_mpp=default_mpp)
         width = min(16, metadata.dimensions[0])
         height = min(16, metadata.dimensions[1])
-        renderer.render_region(path, (0, 0, width, height), (width, height))
+        renderer.render_region(
+            path, (0, 0, width, height), (width, height), source_mpp=default_mpp,
+        )
 
     def overlay_for(
         slide_id: str, overlay_id: str

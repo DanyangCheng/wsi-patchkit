@@ -15,6 +15,7 @@ from .geometry import (
 )
 from .io import (
     AutoSlideReader,
+    ImageReader,
     KfbSlideReader,
     OpenSlideReader,
     SlideReader,
@@ -65,6 +66,7 @@ __all__ = [
     "EncodedImage",
     "GridPatchRequestSampler",
     "IndexedPatchRequestSampler",
+    "ImageReader",
     "Interpolation",
     "KfbSlideReader",
     "LevelSelectionPolicy",

@@ -3,7 +3,7 @@
 `wsi-patchkit` is a small, backend-neutral library for reading patches from
 whole-slide images (WSIs). Version 0.1 provides:
 
-- TIFF, KFB, and OpenSlide readers with a common coordinate contract;
+- ordinary image (Pillow), TIFF, KFB, and OpenSlide readers with a common coordinate contract;
 - physical-resolution (MPP) metadata and level selection;
 - target-MPP-aligned, boundary-padded patch reads;
 - deterministic grid, random, indexed, and tissue-filtered sampling;
@@ -20,19 +20,6 @@ The project is managed with `uv`:
 
 ```bash
 uv sync
-```
-
-Install the optional OpenSlide adapter when the native OpenSlide library is
-already available:
-
-```bash
-uv sync --extra openslide
-```
-
-For platforms supported by the `openslide-bin` wheel, the convenience extra is:
-
-```bash
-uv sync --extra openslide-binary
 ```
 
 PyTorch integration is isolated in another extra:
@@ -69,7 +56,7 @@ uv run wsi-patchkit-viewer --slide-dir /data/slides
 
 `--slide-dir` is repeatable and can be combined with `--slide`. Recognized file
 extensions are `.svs`, `.tif`, `.tiff`, `.kfb`, `.ndpi`, `.mrxs`, `.scn`,
-`.vms`, `.vmu`, `.bif`, and `.qptiff`.
+`.vms`, `.vmu`, `.bif`, `.qptiff`, `.jpg`, `.jpeg`, `.png`, `.bmp`, and `.webp`.
 The slide picker shows discovered files under their relative folders; folders
 can be expanded, and search matches both folder names and slide names.
 
@@ -81,12 +68,54 @@ to choose a persistent location. Uploads are limited to 32 GiB by default; set
 `--max-upload-gb N` to change the limit. The viewer can start without registered
 slides and accept its first slide through the browser. Supported upload
 extensions are `.svs`, `.tif`, `.tiff`, `.btf`, `.btiff`, `.kfb`, `.ndpi`,
-`.qptiff`, `.scn`, and `.bif`.
+`.qptiff`, `.scn`, `.bif`, `.jpg`, `.jpeg`, `.png`, `.bmp`, and `.webp`.
 
-Then open <http://127.0.0.1:8000>. The viewer supports mouse-wheel and pinch
+Then open [http://127.0.0.1:8000](http://127.0.0.1:8000). The viewer supports mouse-wheel and pinch
 zooming, drag panning, double-click zooming, a navigator, level-0 coordinates,
 and an MPP-aware scale bar. TIFF files use the bundled tifffile reader, `.kfb`
-files use `kfbslide`, and other formats are routed to the OpenSlide reader.
+files use `kfbslide`, ordinary images use Pillow, and other WSI formats use
+OpenSlide.
+
+### Ordinary images
+
+`AutoSlideReader` also reads JPEG, PNG, BMP, and WebP. They expose a single
+native level (`level=0`, `downsample=(1, 1)`) and work with the viewer's virtual
+zoom pyramid and server-side crops. EXIF orientation is applied consistently to
+metadata dimensions, displayed pixels, and crop coordinates. Animated WebP uses
+its first frame.
+
+The reader supports eight-bit grayscale, RGB, and RGBA. Bilevel images become
+grayscale; palette, grayscale-alpha, and CMYK images become RGB or RGBA as
+appropriate. Transparency is retained by the reader and composited onto white
+by the viewer. Higher-bit-depth images are rejected rather than silently reduced.
+
+Ordinary images have no MPP by default; display DPI is not treated as specimen
+resolution. Browsing and cropping work without MPP, while physical scale bars,
+physical-coordinate overlays, and target-MPP patch sampling require a known
+`source_mpp`:
+
+```python
+from wsi_patchkit import AutoSlideReader, SlideSpec
+
+with AutoSlideReader() as reader:
+    metadata = reader.metadata("image.png", source_mpp=0.5)
+    slide = SlideSpec.from_metadata(metadata, target_mpp=0.5)
+    region = reader.read_region("image.png", (10, 20), 0, (128, 128))
+```
+
+For the viewer, pass `--source-mpp 0.25` (or `--source-mpp 0.25,0.5` for
+an X/Y pair). This overrides embedded MPP for registered, scanned, and uploaded
+images. All images in that invocation should share the specified resolution.
+For images with detection overlays, use the actual source resolution matching
+`provenance.source_mpp` in the prediction manifest. The Python API accepts
+`create_app(..., source_mpp=0.25)`; a per-image `SlideSource.source_mpp` takes
+precedence over that default.
+
+`ImageReader` caches decoded images per reader, bounded by both `cache_size`
+(default 4) and `max_cache_bytes` (default 256 MiB). Images exceeding the byte
+budget are decoded on each read without being cached. JPEG and PNG generally
+require whole-image decoding; the cache budget does not bound the memory needed
+to decode one image. With multiple reader workers, each has its own cache.
 
 ### Docker Compose
 
@@ -98,7 +127,7 @@ mkdir -p data/slides data/overlays
 docker compose up --build -d
 ```
 
-Open <http://127.0.0.1:8000>. Compose mounts slides and overlays read-only and
+Open [http://127.0.0.1:8000](http://127.0.0.1:8000). Compose mounts slides and overlays read-only and
 stores crops and browser uploads in persistent volumes. Stop the
 service with `docker compose down`; add `--volumes` only when you also want to
 delete saved crops and uploaded slides.
@@ -337,6 +366,31 @@ try:
 finally:
     reader.close()
 ```
+
+For parallel reading, supply a factory that creates an independent reader for
+each thread:
+
+```python
+from contextlib import closing
+
+stream = PatchStream(
+    None, requests, reader_factory=TiffReader, num_workers=4, max_pending=8
+)
+with closing(iter(stream)) as patches:
+    for patch in patches:
+        prediction = model(patch.image)
+```
+
+`num_workers=1` keeps the default synchronous behavior. Parallel mode preserves
+request order and queues at most `max_pending` requests (default: twice the
+thread count), including completed patches waiting to be consumed. It requires
+`reader_factory` rather than a shared reader, since backend handles and caches
+are not safe to share between threads. The iterator closes all readers it
+creates on exhaustion, failure, or explicit iterator closure, after waiting for
+running reads to finish. Each thread has its own metadata and handle caches,
+so memory and open-file usage grow with the thread count. With PyTorch
+DataLoader, process concurrency remains controlled by `num_workers` on the
+DataLoader; this option applies to direct `PatchStream` use.
 
 The grid sampler aligns its final window with the far edge, so an inference
 canvas is fully covered. Use `edge="drop"` if incomplete boundary regions should

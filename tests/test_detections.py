@@ -8,6 +8,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 import tifffile
+from PIL import Image
 
 pytest.importorskip("fastapi")
 httpx = pytest.importorskip("httpx2")
@@ -213,6 +214,7 @@ def test_slide_mpp_bounds_and_revision(tmp_path):
     layer = DetectionOverlay(manifest(tmp_path, revision="run-2"))
     assert layer.cache_token != token
     layer.close()
+
     layer = DetectionOverlay(
         manifest(tmp_path, [{"id": "x", "class_id": 0, "center_um": [8, 8]}])
     )
@@ -221,6 +223,34 @@ def test_slide_mpp_bounds_and_revision(tmp_path):
             layer.validate_slide(metadata())
     finally:
         layer.close()
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("source_mpp,status", [(None, 422), (0.25, 200), (0.5, 422)])
+async def test_png_detection_overlay_requires_matching_mpp(
+    tmp_path, source_mpp, status,
+):
+    image = tmp_path / "case.png"
+    Image.new("RGB", (32, 32)).save(image)
+    app = create_app(
+        {"case": image}, overlays={"case": {"nuclei": manifest(tmp_path)}},
+        source_mpp=source_mpp, upload_dir=tmp_path / "uploads",
+    )
+    async with (
+        app.router.lifespan_context(app),
+        httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=app), base_url="http://testserver"
+        ) as client,
+    ):
+        result = await client.get("/api/slides/case")
+        assert result.status_code == status
+        if source_mpp is None:
+            assert "--source-mpp" in result.json()["detail"]
+        elif status == 422:
+            assert "differs" in result.json()["detail"]
+        else:
+            assert result.json()["mpp"] == [0.25, 0.25]
+            assert (await client.get("/iiif/3/case/info.json")).status_code == 200
 
 
 @pytest.mark.anyio

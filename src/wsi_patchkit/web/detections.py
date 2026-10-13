@@ -377,7 +377,12 @@ class DetectionOverlay:
         key = (metadata.dimensions, metadata.mpp)
         if key in self._validated:
             return
-        if metadata.mpp is None or any(
+        if metadata.mpp is None:
+            raise ValueError(
+                "slide has no MPP; provide source_mpp or --source-mpp "
+                "to align physical-coordinate detections"
+            )
+        if any(
             not math.isclose(a, b, rel_tol=1e-6)
             for a, b in zip(metadata.mpp, self.source_mpp, strict=True)
         ):
