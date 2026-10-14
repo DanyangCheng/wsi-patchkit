@@ -3,7 +3,9 @@
 冻结日期：2026-10-13。此文规定阶段 1–4 的实现；阶段 0 只交付契约、参考计算与回归基线，不表示以下 API 已可调用。
 
 阶段 1 已实现：PhysicalPatchRequest（含 from_legacy）、OutputGrid、SamplingLimits、SamplingPlan、
-plan_physical_read 与 canvas_rounding 传播。其余同步像素/完整结果/结果流入口按阶段 2–4 实施。
+plan_physical_read 与 canvas_rounding 传播。阶段 2 已实现 read_physical_patch_result 与
+PhysicalPatchResult，支持 nearest/bilinear + constant 及 native nearest。
+bicubic/area/reflect 的像素实现及完整结果流按阶段 3–4 实施。
 
 ## 需求版本
 
@@ -30,7 +32,7 @@ SamplingPlan(request, grid, source_level, native_origin, read_location,
 PhysicalPatchResult(request, image, valid_mask, grid, source_level, plan)
 plan_physical_read(metadata, request, *, limits=SamplingLimits()) -> SamplingPlan
 read_physical_patch_result(reader, request, *, metadata=None,
-    limits=SamplingLimits()) -> PhysicalPatchResult
+    limits=SamplingLimits(), plan=None) -> PhysicalPatchResult
 PhysicalPatchStream(reader, requests, *, reader_factory=None,
     num_workers=1, max_pending=None, limits=SamplingLimits(),
     own_requests=False) -> iterable[PhysicalPatchResult]
@@ -43,6 +45,9 @@ grid.output_to_slide_um 的齐次矩阵为
 输入向量为 `[col,row,1]`；不要求存储逐像素坐标数组。
 无像素 IO 时 read_size=(0,0)，native_origin/read_location=None；仍返回选层、grid 和 plan。
 提供已有 metadata 时其 path/source_mpp 必须与请求匹配，否则报错，不静默忽略覆盖。
+同步入口可接收已有 plan；在任何像素 IO/输出分配前对 metadata/request/limits 重规划并比较，
+不相等时报错。使用自定义 plan.limits 时须显式传入相同 limits，不能通过旧 plan 绕过当前限额。
+plan 相等时结果保留传入的 plan 对象。reader 为借用资源，由调用方关闭；后端原始异常保持。
 from_legacy 使用 `(x*target_mpp_x,y*target_mpp_y)`；已经丢失的分数无法恢复。
 
 选层、插值、填充和颜色模式只由请求表达，流不提供这些默认配置，以消除覆盖歧义。

@@ -17,6 +17,19 @@
 - Preserved legacy pixel snapshots and `Patch(request, image)` construction.
   Exact pixel resampling and physical result streams remain later milestones.
 
+### 0.2.0 — phase 2 exact synchronous reads
+
+- Added `read_physical_patch_result` and `PhysicalPatchResult` with owned
+  images, HW physical-center valid masks, output grids, actual native levels,
+  and sampling plans; supplied plans are checked against metadata and limits.
+- Implemented center-based nearest and float64 bilinear with constant fill,
+  native-edge clamp, fixed uint8 rounding, and zero pixel IO for outside reads.
+- Added strict reader-array checks, grayscale/RGBA RGB conversion, and exact
+  native bool/integer nearest reads, including uint64 labels.
+- Verified independent gradient/impulse references, strip-boundary sampling,
+  PNG/noninteger TIFF pyramids, and legacy pixel snapshots. Bicubic, area,
+  reflect, and physical streams remain phases 3–4.
+
 ### Other changes
 
 - Added detection-manifest registration, disk-backed spatial indexing, and

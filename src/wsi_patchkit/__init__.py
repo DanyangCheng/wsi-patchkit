@@ -22,6 +22,7 @@ from .io import (
     SlideReader,
     TiffReader,
 )
+from .reading import read_physical_patch_result
 from .sampling import (
     GridPatchRequestSampler,
     IndexedPatchRequestSampler,
@@ -49,6 +50,7 @@ from .types import (
     Patch,
     PatchRequest,
     PhysicalPatchRequest,
+    PhysicalPatchResult,
     PixelFormat,
     SamplingContext,
     SamplingLimits,
@@ -69,6 +71,8 @@ __all__ = [
     "MPP",
     "CanvasRounding",
     "PhysicalPatchRequest",
+    "PhysicalPatchResult",
+    "read_physical_patch_result",
     "OutputGrid",
     "SamplingLimits",
     "SamplingPlan",

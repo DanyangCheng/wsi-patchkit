@@ -6,6 +6,7 @@ whole-slide images (WSIs). Version 0.2 provides:
 - ordinary image (Pillow), TIFF, KFB, and OpenSlide readers with a common coordinate contract;
 - physical-resolution (MPP) metadata and level selection;
 - strict continuous physical requests, output grids, and IO-free sampling plans;
+- exact synchronous nearest/bilinear reads with physical-center valid masks;
 - target-MPP-aligned, boundary-padded patch reads;
 - deterministic grid, random, indexed, and tissue-filtered sampling;
 - lazy patch streams;
@@ -20,8 +21,9 @@ formats intentionally remain application concerns.
 Phase 1 exposes `PhysicalPatchRequest`, `OutputGrid`, `SamplingLimits`,
 `SamplingPlan`, and `plan_physical_read`. Planning preserves negative and
 fractional origins, selects the native level, and budgets one native region
-without reading or allocating pixel arrays. Exact resampling and complete
-result streams are scheduled for phases 2–4.
+without reading or allocating pixel arrays. Phase 2 adds exact synchronous
+nearest/bilinear reads with constant padding. Extended interpolation/padding
+and complete result streams are scheduled for phases 3–4.
 
 ```python
 from wsi_patchkit import ImageReader, PhysicalPatchRequest, SamplingLimits, plan_physical_read
@@ -71,6 +73,55 @@ the request's strategy, with an optional explicit `canvas_rounding` override;
 `virtual_canvas_size` accepts the same option. The default `"round"` retains
 ties-to-even behavior. Canvas coverage and exact physical-center validity are
 separate contracts.
+
+### Exact synchronous reads
+
+```python
+from wsi_patchkit import ImageReader, PhysicalPatchRequest, read_physical_patch_result
+
+request = PhysicalPatchRequest(
+    "slide.png",
+    origin_um=(0.125, -0.5),
+    output_size=(256, 128),
+    target_mpp=(0.5, 0.75),
+    source_mpp=(0.25, 0.5),
+    interpolation="bilinear",
+    padding_mode="constant",
+    fill_value=(255, 255, 255),
+)
+with ImageReader() as reader:
+    result = read_physical_patch_result(reader, request)
+
+print(result.image.shape, result.valid_mask.shape)  # (128, 256, 3), (128, 256)
+print(result.source_level, result.grid.output_to_slide_um)
+# Arrays remain valid after the reader closes.
+```
+
+Centers follow `origin_um + (col + 0.5, row + 0.5) * target_mpp`.
+`valid_mask` is HW bool and tests those centers against the level-0 physical
+half-open extent. Right/bottom boundary centers are invalid. An invalid center
+receives the entire constant fill; interpolation neighbors of valid centers
+clamp at native edges. A fully outside request makes no pixel IO calls.
+
+Nearest chooses `floor(s + 0.5)` in native center coordinates; bilinear uses
+float64 weights and `clip(floor(value + 0.5), 0, 255)` quantization. RGB requires
+uint8, expands grayscale, and composites RGBA on white before sampling.
+`color_mode="native"` requires nearest and preserves bool/integer dtype and
+channel count (2D data becomes HWC with one channel). Native fills must fit the
+source dtype; fully outside native requests require reliable `PixelFormat`
+metadata. Unsupported shape, dtype, or metadata/region mismatch raises an error.
+
+The same `SamplingLimits` apply to synchronous reads before output allocation
+and pixel IO. Supplied metadata can avoid repeated metadata queries. An optional
+`plan=plan` is verified against metadata/request/limits before IO; when planning
+with custom limits, pass `limits=plan.limits` to the read too. Results contain
+`request/image/valid_mask/grid/source_level/plan`, and both arrays own their data.
+The synchronous reader is borrowed and remains caller-owned on success or error.
+
+In the current synchronous API, bicubic, area, and reflect raise explicit errors
+before metadata or pixel IO. Planning already describes their phase-3 geometry.
+The existing `read_aligned_patch*`, `PatchStream`, and torch adapter keep their
+legacy sampling path; physical result streams arrive in phase 4.
 
 ## Install
 

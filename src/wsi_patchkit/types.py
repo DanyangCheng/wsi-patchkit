@@ -10,7 +10,9 @@ from pathlib import Path
 from types import MappingProxyType
 from typing import Literal
 
+import numpy as np
 from numpy import bool_
+from numpy.typing import NDArray
 
 from ._canvas import CanvasRounding, canvas_size
 from ._validation import (
@@ -397,6 +399,18 @@ class SamplingPlan:
     @property
     def read_pixels(self) -> int:
         return self.read_size[0] * self.read_size[1]
+
+
+@dataclass(frozen=True, slots=True)
+class PhysicalPatchResult:
+    """An owned HWC image and HW center-valid mask on the requested grid."""
+
+    request: PhysicalPatchRequest
+    image: NDArray[np.generic]
+    valid_mask: NDArray[np.bool_]
+    grid: OutputGrid
+    source_level: int
+    plan: SamplingPlan
 
 
 @dataclass(frozen=True, slots=True)
