@@ -2,6 +2,23 @@
 
 ## Unreleased
 
+### 0.2.0 — phase 1 physical sampling plans
+
+- Added strict `PhysicalPatchRequest`, `OutputGrid`, `SamplingLimits`, and
+  `SamplingPlan`, including center affines and explicit legacy conversion.
+- Added IO-free `plan_physical_read` with per-request level/policy, native
+  neighborhood bounds, constant/reflect planning, area footprint budgets,
+  overflow checks, and output/read pixel limits before allocation or IO.
+- Added shared `round`/`ceil` canvas policies carried from slide specifications
+  through grid/random/tissue samplers and aligned read helpers.
+- Added `FutureWarning` for implicit legacy integer conversions and bool MPP;
+  these inputs will be rejected in 0.3.0. Fractional MPP remains valid.
+- Reject invalid explicit helper levels and policies before region IO.
+- Preserved legacy pixel snapshots and `Patch(request, image)` construction.
+  Exact pixel resampling and physical result streams remain later milestones.
+
+### Other changes
+
 - Added detection-manifest registration, disk-backed spatial indexing, and
   high-magnification local point rendering with adjustable radius, class
   colors, filled/hollow styles, and opacity.

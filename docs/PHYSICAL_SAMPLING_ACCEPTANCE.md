@@ -41,3 +41,12 @@ PNG/TIFF 文件在 tmp_path 生成，不依赖大文件；vendor 实例按样本
 2026-10-13 执行记录：上述两组测试合并运行，139 passed in 0.52s
 （阶段 0 新增 65 项、相关既有回归 74 项）；新增四个 Python 文件的 Ruff 检查通过。
 本轮未运行全量 web/torch 测试，也未执行 vendor 精确采样校准；这些保留在阶段 5。
+
+## 阶段 1 更新
+
+A01/A04/A08/A13 的规划与类型子集、A16 兼容基础已实现并验证，详细输入/证据见
+[阶段 1 实施记录](PHASE1_IMPLEMENTATION.md)。新测试为 test_physical_types.py、
+test_sampling_plan.py、test_canvas_rounding.py；上表其余像素/流/后端条件继续按所属阶段执行。
+不能将规划通过等同于图像/mask/完整结果流已经可用。
+本轮相关整组回归：283 passed（含新阶段 1 测试 129 项），Ruff 检查通过；
+PyTorch 多进程用例使用沙箱外环境完成，详见实施记录的运行限制。

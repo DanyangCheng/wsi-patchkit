@@ -2,6 +2,9 @@
 
 冻结日期：2026-10-13。此文规定阶段 1–4 的实现；阶段 0 只交付契约、参考计算与回归基线，不表示以下 API 已可调用。
 
+阶段 1 已实现：PhysicalPatchRequest（含 from_legacy）、OutputGrid、SamplingLimits、SamplingPlan、
+plan_physical_read 与 canvas_rounding 传播。其余同步像素/完整结果/结果流入口按阶段 2–4 实施。
+
 ## 需求版本
 
 原文从 `/home/cdy/Projects/SlideInfer/docs/WSI_PATCHKIT_REQUIREMENTS.md` 原样归档到
@@ -23,7 +26,7 @@ PhysicalPatchRequest.from_legacy(request) -> PhysicalPatchRequest
 SamplingLimits(max_output_pixels=16_777_216, max_read_pixels=67_108_864)
 OutputGrid(origin_um, target_mpp, output_size)
 SamplingPlan(request, grid, source_level, native_origin, read_location,
-    read_size, limits)
+    read_size, limits, native_mpp, source_extent_um, pixel_format)
 PhysicalPatchResult(request, image, valid_mask, grid, source_level, plan)
 plan_physical_read(metadata, request, *, limits=SamplingLimits()) -> SamplingPlan
 read_physical_patch_result(reader, request, *, metadata=None,
@@ -109,6 +112,9 @@ dtype/通道来自所选层可靠 PixelFormat；完全越界且格式未知时�
 对实际原生像素取最小整数包围框。零权重邻点可省略；非零权重邻点不得省略。
 读框位于层内，计数为实际 `read_width*read_height`，包含全部邻域与框内未使用像素；
 不包含 backend 内部整 tile 解码、缓存或通道字节数。reflect 远距原点不直接进入包围框。
+阶段 1 规划保留点核的零权重邻点，预算含这些像素；constant 用端点及标量二分查找，
+reflect 最坏 O(width+height) 标量工作量、O(1) 辅助内存。area 的单个 footprint 反射范围用解析极值计算，
+不逐个枚举巨大 footprint 内的原生像素；任何规划路径都不分配 HW 或轴向坐标数组。
 level-0 起点使用 `ceil(nextafter(native_index*axis_downsample,-inf))`，并通过后端样本验证映射。
 
 默认输出 16,777,216 像素（4096²），读取 67,108,864 像素（8192²），
@@ -145,10 +151,12 @@ GeneratorExit 不吞掉清理失败。清理错误顺序固定：worker 编号�
 
 当前版本 0.1.0 的合法整数 PatchRequest、Patch(request,image)、默认 round、旧 helper/旧流像素行为保留。
 旧 helper 最近邻左边缘索引、Pillow bilinear/BOX、旧矩形 mask 保留，快照见 tests/fixtures/phase0。
-在 0.2.0（阶段 1）为旧分数/bool 的坐标、尺寸、fill 和 MPP 转换发出 FutureWarning，指出字段、
+在 0.2.0（阶段 1）为旧分数/bool 的坐标、尺寸、fill 及 bool MPP 转换发出 FutureWarning，指出字段、
 PhysicalPatchRequest 替代方式及 0.3.0 拒绝版本；0.3.0 开始拒绝。拒绝时间以版本为界，不设日历截止日期。
 阶段 0 不提前改变运行行为。其他旧入口的相同隐式转换在阶段 1 审计，并遵循同一迁移表。
 严格精确入口自首次发布即执行校验。不改变 viewer/IIIF 或 torch 默认数据项结构。
+合法的分数 MPP 保持支持。整数值浮点整数参数也提示迁移，0.3.0 与分数整数参数一起拒绝。
+旧 helper 的显式 level 已立即拒绝负数/bool/浮点/越界值，显式 level 不屏蔽非法 policy。
 
 ## 验收证据
 

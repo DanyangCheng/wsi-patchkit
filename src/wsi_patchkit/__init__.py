@@ -2,6 +2,7 @@
 
 from importlib.metadata import PackageNotFoundError, version
 
+from ._canvas import CanvasRounding
 from .geometry import (
     Interpolation,
     LevelSelectionPolicy,
@@ -32,6 +33,7 @@ from .sampling import (
     TissueRandomPatchRequestSampler,
     axis_positions,
 )
+from .sampling_plan import plan_physical_read
 from .stream import PatchStream
 from .tiles import (
     EncodedImage,
@@ -43,10 +45,14 @@ from .tiles import (
 from .types import (
     MPP,
     LevelInfo,
+    OutputGrid,
     Patch,
     PatchRequest,
+    PhysicalPatchRequest,
     PixelFormat,
     SamplingContext,
+    SamplingLimits,
+    SamplingPlan,
     Size,
     SlideMetadata,
     SlideSpec,
@@ -57,10 +63,16 @@ from .types import (
 try:
     __version__ = version("wsi-patchkit")
 except PackageNotFoundError:
-    __version__ = "0.1.0"
+    __version__ = "0.2.0"
 
 __all__ = [
     "MPP",
+    "CanvasRounding",
+    "PhysicalPatchRequest",
+    "OutputGrid",
+    "SamplingLimits",
+    "SamplingPlan",
+    "plan_physical_read",
     "Size",
     "AutoSlideReader",
     "EncodedImage",

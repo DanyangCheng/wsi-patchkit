@@ -4,10 +4,24 @@ from __future__ import annotations
 
 import math
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass, field
+from dataclasses import KW_ONLY, dataclass, field
+from numbers import Integral, Real
 from pathlib import Path
 from types import MappingProxyType
 from typing import Literal
+
+from numpy import bool_
+
+from ._canvas import CanvasRounding, canvas_size
+from ._validation import (
+    derived_finite,
+    integer,
+    legacy_integer_warning,
+    migration_warning,
+    option,
+    pair,
+    physical_pair,
+)
 
 MPP = tuple[float, float]
 Size = tuple[int, int]
@@ -39,10 +53,16 @@ class PixelFormat:
 
 def as_mpp(value: float | Sequence[float], *, name: str = "mpp") -> MPP:
     """Validate a scalar or X/Y pair and return an MPP pair."""
-    if isinstance(value, (int, float)):
+    if isinstance(value, (Real, bool_)):
+        if isinstance(value, (bool, bool_)):
+            migration_warning(name)
         pair = float(value), float(value)
     else:
-        pair = tuple(float(item) for item in value)
+        items = tuple(value)
+        for item in items:
+            if isinstance(item, (bool, bool_)):
+                migration_warning(name)
+        pair = tuple(float(item) for item in items)
         if len(pair) != 2:
             raise ValueError(f"{name} must be a scalar or an X/Y pair")
     if not all(math.isfinite(item) and item > 0 for item in pair):
@@ -52,10 +72,14 @@ def as_mpp(value: float | Sequence[float], *, name: str = "mpp") -> MPP:
 
 def as_size(value: int | Sequence[int], *, name: str = "size") -> Size:
     """Validate a scalar or width/height pair."""
-    if isinstance(value, int):
-        pair = value, value
+    if isinstance(value, (Integral, bool_)):
+        legacy_integer_warning(value, name)
+        pair = int(value), int(value)
     else:
-        pair = tuple(int(item) for item in value)
+        items = tuple(value)
+        for axis, item in enumerate(items):
+            legacy_integer_warning(item, f"{name}[{axis}]")
+        pair = tuple(int(item) for item in items)
         if len(pair) != 2:
             raise ValueError(f"{name} must be an integer or a width/height pair")
     if any(item < 1 for item in pair):
@@ -130,8 +154,10 @@ class SlideSpec:
     target_mpp: MPP | float
     source_mpp: MPP | float | None = None
     weight: float = 1.0
+    canvas_rounding: CanvasRounding = "round"
 
     def __post_init__(self) -> None:
+        option(self.canvas_rounding, "canvas_rounding", ("round", "ceil"))
         object.__setattr__(self, "path", str(Path(self.path)))
         object.__setattr__(
             self, "canvas_size", as_size(self.canvas_size, name="canvas_size")
@@ -155,22 +181,20 @@ class SlideSpec:
         *,
         target_mpp: float | Sequence[float],
         weight: float = 1.0,
+        canvas_rounding: CanvasRounding = "round",
     ) -> SlideSpec:
         """Construct a virtual-canvas specification from physical metadata."""
         if metadata.mpp is None:
             raise ValueError("slide has no MPP metadata; provide source_mpp explicitly")
         target = as_mpp(target_mpp, name="target_mpp")
-        width, height = metadata.dimensions
-        canvas = (
-            max(1, round(width * metadata.mpp[0] / target[0])),
-            max(1, round(height * metadata.mpp[1] / target[1])),
-        )
+        canvas = canvas_size(metadata.dimensions, metadata.mpp, target, canvas_rounding)
         return cls(
             metadata.path,
             canvas_size=canvas,
             target_mpp=target,
             source_mpp=metadata.mpp,
             weight=weight,
+            canvas_rounding=canvas_rounding,
         )
 
 
@@ -186,10 +210,13 @@ class PatchRequest:
     target_mpp: MPP | float
     source_mpp: MPP | float | None = None
     fill_value: int = 255
+    canvas_rounding: CanvasRounding = "round"
 
     def __post_init__(self) -> None:
+        option(self.canvas_rounding, "canvas_rounding", ("round", "ceil"))
         object.__setattr__(self, "slide", str(Path(self.slide)))
         for name in ("x", "y", "width", "height", "fill_value"):
+            legacy_integer_warning(getattr(self, name), name)
             object.__setattr__(self, name, int(getattr(self, name)))
         if self.width < 1 or self.height < 1:
             raise ValueError("patch width and height must be positive")
@@ -202,6 +229,174 @@ class PatchRequest:
             object.__setattr__(
                 self, "source_mpp", as_mpp(self.source_mpp, name="source_mpp")
             )
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class OutputGrid:
+    """Continuous pixel-boundary origin, spacing, and center affine in µm."""
+
+    origin_um: tuple[float, float]
+    target_mpp: MPP | float
+    output_size: Size
+
+    def __post_init__(self) -> None:
+        origin = physical_pair(self.origin_um, "origin_um")
+        target = physical_pair(self.target_mpp, "target_mpp", scalar=True)
+        size = tuple(
+            integer(v, f"output_size[{a}]", minimum=1)
+            for a, v in enumerate(pair(self.output_size, "output_size"))
+        )
+        for axis in (0, 1):
+            try:
+                derived_finite(
+                    origin[axis] + size[axis] * target[axis],
+                    f"output_size[{axis}]*target_mpp[{axis}]",
+                )
+            except OverflowError as error:
+                raise ValueError(
+                    f"output_size[{axis}] derived range overflow"
+                ) from error
+        object.__setattr__(self, "origin_um", origin)
+        object.__setattr__(self, "target_mpp", target)
+        object.__setattr__(self, "output_size", size)
+
+    @property
+    def output_to_slide_um(self) -> tuple[tuple[float, float, float], ...]:
+        """Homogeneous transform of [col, row, 1] to the physical center."""
+        x, y = self.origin_um
+        mx, my = self.target_mpp
+        return ((mx, 0.0, x + 0.5 * mx), (0.0, my, y + 0.5 * my), (0.0, 0.0, 1.0))
+
+
+@dataclass(frozen=True, slots=True)
+class PhysicalPatchRequest:
+    """Strict request on a continuous physical grid; no pixel IO or truncation."""
+
+    slide: str | Path
+    _: KW_ONLY
+    origin_um: tuple[float, float]
+    output_size: Size
+    target_mpp: MPP | float
+    source_mpp: MPP | float | None = None
+    level: int | None = None
+    level_policy: Literal["nearest", "finer"] = "nearest"
+    interpolation: Literal["nearest", "bilinear", "bicubic", "area"] = "bilinear"
+    padding_mode: Literal["constant", "reflect"] = "constant"
+    fill_value: int | tuple[int, int, int] = 255
+    color_mode: Literal["rgb", "native"] = "rgb"
+
+    def __post_init__(self) -> None:
+        try:
+            slide = str(Path(self.slide))
+        except (TypeError, ValueError) as error:
+            raise ValueError("slide must be a filesystem path") from error
+        grid = OutputGrid(
+            origin_um=self.origin_um,
+            output_size=self.output_size,
+            target_mpp=self.target_mpp,
+        )
+        object.__setattr__(self, "slide", slide)
+        for name in ("origin_um", "output_size", "target_mpp"):
+            object.__setattr__(self, name, getattr(grid, name))
+        if self.source_mpp is not None:
+            object.__setattr__(
+                self,
+                "source_mpp",
+                physical_pair(self.source_mpp, "source_mpp", scalar=True),
+            )
+        if self.level is not None:
+            object.__setattr__(self, "level", integer(self.level, "level", minimum=0))
+        for name, choices in (
+            ("level_policy", ("nearest", "finer")),
+            ("interpolation", ("nearest", "bilinear", "bicubic", "area")),
+            ("padding_mode", ("constant", "reflect")),
+            ("color_mode", ("rgb", "native")),
+        ):
+            option(getattr(self, name), name, choices)
+        if self.color_mode == "native":
+            if self.interpolation != "nearest":
+                raise ValueError("interpolation: native requires nearest")
+            fill = integer(self.fill_value, "fill_value")
+        elif isinstance(self.fill_value, Integral):
+            fill = integer(self.fill_value, "fill_value", minimum=0)
+            if fill > 255:
+                raise ValueError("fill_value must be in [0,255]")
+        else:
+            try:
+                values = tuple(self.fill_value)
+            except TypeError as error:
+                raise ValueError(
+                    "fill_value must be an integer or RGB triple"
+                ) from error
+            if len(values) != 3:
+                raise ValueError("fill_value must contain exactly three RGB integers")
+            fill = tuple(
+                integer(v, f"fill_value[{a}]", minimum=0) for a, v in enumerate(values)
+            )
+            if any(v > 255 for v in fill):
+                raise ValueError("fill_value components must be in [0,255]")
+        object.__setattr__(self, "fill_value", fill)
+
+    @property
+    def grid(self) -> OutputGrid:
+        return OutputGrid(
+            origin_um=self.origin_um,
+            target_mpp=self.target_mpp,
+            output_size=self.output_size,
+        )
+
+    @classmethod
+    def from_legacy(cls, request: PatchRequest) -> PhysicalPatchRequest:
+        """Convert integer canvas coordinates; earlier truncation is irreversible."""
+        return cls(
+            request.slide,
+            origin_um=(
+                request.x * request.target_mpp[0],
+                request.y * request.target_mpp[1],
+            ),
+            output_size=(request.width, request.height),
+            target_mpp=request.target_mpp,
+            source_mpp=request.source_mpp,
+            fill_value=request.fill_value,
+        )
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class SamplingLimits:
+    """Per-request pixel limits; None independently disables either check."""
+
+    max_output_pixels: int | None = 16_777_216
+    max_read_pixels: int | None = 67_108_864
+
+    def __post_init__(self) -> None:
+        for name in ("max_output_pixels", "max_read_pixels"):
+            value = getattr(self, name)
+            if value is not None:
+                object.__setattr__(self, name, integer(value, name, minimum=1))
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class SamplingPlan:
+    """Immutable single-region IO budget and independent output geometry."""
+
+    request: PhysicalPatchRequest
+    grid: OutputGrid
+    source_level: int
+    native_origin: tuple[int, int] | None
+    read_location: tuple[int, int] | None
+    read_size: Size
+    limits: SamplingLimits
+    native_mpp: MPP
+    source_extent_um: tuple[float, float]
+    pixel_format: PixelFormat | None
+
+    @property
+    def output_pixels(self) -> int:
+        return self.grid.output_size[0] * self.grid.output_size[1]
+
+    @property
+    def read_pixels(self) -> int:
+        return self.read_size[0] * self.read_size[1]
 
 
 @dataclass(frozen=True, slots=True)

@@ -1,10 +1,11 @@
 # wsi-patchkit
 
 `wsi-patchkit` is a small, backend-neutral library for reading patches from
-whole-slide images (WSIs). Version 0.1 provides:
+whole-slide images (WSIs). Version 0.2 provides:
 
 - ordinary image (Pillow), TIFF, KFB, and OpenSlide readers with a common coordinate contract;
 - physical-resolution (MPP) metadata and level selection;
+- strict continuous physical requests, output grids, and IO-free sampling plans;
 - target-MPP-aligned, boundary-padded patch reads;
 - deterministic grid, random, indexed, and tissue-filtered sampling;
 - lazy patch streams;
@@ -13,6 +14,63 @@ whole-slide images (WSIs). Version 0.1 provides:
 
 Dataset manifests, labels, augmentation, model execution, and prediction output
 formats intentionally remain application concerns.
+
+## Physical sampling plans
+
+Phase 1 exposes `PhysicalPatchRequest`, `OutputGrid`, `SamplingLimits`,
+`SamplingPlan`, and `plan_physical_read`. Planning preserves negative and
+fractional origins, selects the native level, and budgets one native region
+without reading or allocating pixel arrays. Exact resampling and complete
+result streams are scheduled for phases 2–4.
+
+```python
+from wsi_patchkit import ImageReader, PhysicalPatchRequest, SamplingLimits, plan_physical_read
+
+request = PhysicalPatchRequest(
+    "slide.png",
+    origin_um=(0.125, -0.5),
+    output_size=(256, 128),  # width, height
+    target_mpp=(0.5, 0.75),
+    source_mpp=(0.25, 0.5),
+    level_policy="finer",   # an explicit level takes precedence
+    interpolation="bilinear",
+    fill_value=(255, 255, 255),
+)
+with ImageReader() as reader:
+    metadata = reader.metadata(request.slide, source_mpp=request.source_mpp)
+    plan = plan_physical_read(metadata, request, limits=SamplingLimits())
+
+print(plan.source_level, plan.read_location, plan.read_size)
+print(plan.grid.output_to_slide_um)  # [col, row, 1] -> pixel center in micrometres
+```
+
+Supplied metadata must match the slide path and any `source_mpp` override.
+Defaults cap output pixels at 16,777,216 and native read pixels at 67,108,864,
+including interpolation neighbors and unused pixels inside the read rectangle.
+Set either limit to `None` independently to disable it. `0` is invalid. The
+planner retains zero-weight point-kernel neighbors in its budget. Constant
+planning uses scalar searches; reflect planning uses at most O(width + height)
+scalar work and O(1) auxiliary memory. Neither allocates an HW coordinate array.
+
+The new request rejects bool, fractional or floating-point integer fields,
+nonfinite coordinates, and nonpositive MPP. Physical coordinates and MPP may
+be fractional; integer fields accept Python and NumPy integers. Native mode
+requires nearest. Area planning requires both axes to avoid enlargement and
+follows physical footprint weights; it does not invoke the legacy BOX resize.
+See the [sampling contract](docs/PHYSICAL_SAMPLING_CONTRACT.md) for details.
+
+Use `PhysicalPatchRequest.from_legacy(request)` to convert an old request's
+origin to `(x * target_mpp_x, y * target_mpp_y)`. Previously truncated fractions
+cannot be recovered. Legacy fractional/bool integer inputs and bool MPP emit
+`FutureWarning` in 0.2.0 and will be rejected in 0.3.0. Valid integer inputs
+and old helper pixel results remain compatible.
+
+`SlideSpec.from_metadata(..., canvas_rounding="ceil")` propagates its strategy
+through grid, random, and tissue samplers into `PatchRequest`. Old helpers use
+the request's strategy, with an optional explicit `canvas_rounding` override;
+`virtual_canvas_size` accepts the same option. The default `"round"` retains
+ties-to-even behavior. Canvas coverage and exact physical-center validity are
+separate contracts.
 
 ## Install
 

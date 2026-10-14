@@ -65,4 +65,5 @@ class RandomPatchRequestSampler:
                 slide.target_mpp,
                 source_mpp=slide.source_mpp,
                 fill_value=self.fill_value,
+                canvas_rounding=slide.canvas_rounding,
             )

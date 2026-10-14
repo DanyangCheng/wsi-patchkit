@@ -10,8 +10,10 @@ import numpy as np
 from numpy.typing import NDArray
 from PIL import Image
 
+from ._canvas import CanvasRounding, canvas_size
+from ._validation import derived_finite, integer, option
 from .io.base import SlideReader
-from .types import LevelInfo, PatchRequest, SlideMetadata
+from .types import LevelInfo, PatchRequest, SlideMetadata, as_mpp
 
 LevelSelectionPolicy = Literal["nearest", "finer"]
 Interpolation = Literal["nearest", "bilinear", "area"]
@@ -85,15 +87,23 @@ def choose_level(
 def virtual_canvas_size(
     metadata: SlideMetadata,
     target_mpp: tuple[float, float],
+    *,
+    canvas_rounding: CanvasRounding = "round",
 ) -> tuple[int, int]:
     """Return the level-0 physical extent sampled at ``target_mpp``."""
     if metadata.mpp is None:
         raise ValueError("slide has no MPP metadata; provide source_mpp")
-    width, height = metadata.dimensions
-    return (
-        max(1, round(width * metadata.mpp[0] / target_mpp[0])),
-        max(1, round(height * metadata.mpp[1] / target_mpp[1])),
-    )
+    target = as_mpp(target_mpp, name="target_mpp")
+    return canvas_size(metadata.dimensions, metadata.mpp, target, canvas_rounding)
+
+
+def native_to_level_zero(index: int, downsample: float) -> int:
+    """Stable integer location for readers mapping floor(location/downsample)."""
+    try:
+        product = derived_finite(index * downsample, "read_location")
+    except OverflowError as error:
+        raise ValueError("read_location derived range overflow") from error
+    return math.ceil(math.nextafter(product, -math.inf))
 
 
 def plan_aligned_read(
@@ -102,10 +112,16 @@ def plan_aligned_read(
     *,
     level: int | None = None,
     level_policy: LevelSelectionPolicy = "nearest",
+    canvas_rounding: CanvasRounding | None = None,
 ) -> ReadPlan | None:
     """Plan an MPP-aligned, clipped read for one request."""
     if metadata.mpp is None:
         raise ValueError("slide has no MPP metadata; set PatchRequest.source_mpp")
+    option(level_policy, "level_policy", ("nearest", "finer"))
+    if level is not None:
+        level = integer(level, "level", minimum=0)
+        if level >= len(metadata.levels):
+            raise ValueError(f"level {level} is unavailable for {metadata.path!r}")
     selected = (
         choose_level(metadata, request.target_mpp, policy=level_policy)
         if level is None
@@ -113,7 +129,13 @@ def plan_aligned_read(
     )
     if selected.mpp is None:
         raise ValueError("selected level has no MPP metadata")
-    canvas_width, canvas_height = virtual_canvas_size(metadata, request.target_mpp)
+    canvas_width, canvas_height = virtual_canvas_size(
+        metadata,
+        request.target_mpp,
+        canvas_rounding=(
+            request.canvas_rounding if canvas_rounding is None else canvas_rounding
+        ),
+    )
     x0, y0 = max(0, request.x), max(0, request.y)
     x1 = min(canvas_width, request.x + request.width)
     y1 = min(canvas_height, request.y + request.height)
@@ -140,8 +162,8 @@ def plan_aligned_read(
     # the selected-level coordinate.  nextafter keeps mathematically integral
     # products stable in the presence of a one-ULP floating-point overshoot.
     level_zero_location = (
-        math.ceil(math.nextafter(lx0 * selected.downsample[0], -math.inf)),
-        math.ceil(math.nextafter(ly0 * selected.downsample[1], -math.inf)),
+        native_to_level_zero(lx0, selected.downsample[0]),
+        native_to_level_zero(ly0, selected.downsample[1]),
     )
     destination = (
         x0 - request.x,
@@ -213,9 +235,7 @@ def _resize_rgb(
         raise ValueError("area interpolation only supports downsampling")
     image = Image.fromarray(array, mode="RGB")
     resample = (
-        Image.Resampling.BOX
-        if interpolation == "area"
-        else Image.Resampling.BILINEAR
+        Image.Resampling.BOX if interpolation == "area" else Image.Resampling.BILINEAR
     )
     return np.asarray(image.resize(size, resample=resample))
 
@@ -229,6 +249,7 @@ def read_aligned_patch_result(
     level_policy: LevelSelectionPolicy = "nearest",
     interpolation: Interpolation = "bilinear",
     color_mode: Literal["rgb", "native"] = "rgb",
+    canvas_rounding: CanvasRounding | None = None,
 ) -> PatchReadResult:
     """Materialize a request and report which output pixels came from the WSI."""
     metadata = metadata or reader.metadata(
@@ -240,6 +261,7 @@ def read_aligned_patch_result(
         request,
         level=level,
         level_policy=level_policy,
+        canvas_rounding=canvas_rounding,
     )
     if color_mode == "rgb":
         result: NDArray[np.generic] = np.full(
@@ -295,6 +317,7 @@ def read_aligned_patch(
     level_policy: LevelSelectionPolicy = "nearest",
     interpolation: Interpolation = "bilinear",
     color_mode: Literal["rgb", "native"] = "rgb",
+    canvas_rounding: CanvasRounding | None = None,
 ) -> NDArray[np.generic]:
     """Materialize a target-MPP request as a padded HWC array.
 
@@ -308,4 +331,5 @@ def read_aligned_patch(
         level_policy=level_policy,
         interpolation=interpolation,
         color_mode=color_mode,
+        canvas_rounding=canvas_rounding,
     ).image
