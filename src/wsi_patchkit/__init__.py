@@ -35,7 +35,7 @@ from .sampling import (
     axis_positions,
 )
 from .sampling_plan import plan_physical_read
-from .stream import PatchStream
+from .stream import PatchStream, PhysicalPatchStream
 from .tiles import (
     EncodedImage,
     SlideReaderPool,
@@ -72,6 +72,7 @@ __all__ = [
     "CanvasRounding",
     "PhysicalPatchRequest",
     "PhysicalPatchResult",
+    "PhysicalPatchStream",
     "read_physical_patch_result",
     "OutputGrid",
     "SamplingLimits",

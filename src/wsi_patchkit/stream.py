@@ -2,16 +2,23 @@
 
 from __future__ import annotations
 
-from collections import deque
 from collections.abc import Callable, Iterable, Iterator
-from concurrent.futures import Future, ThreadPoolExecutor
-from contextlib import ExitStack
-from threading import local
 from typing import Literal
 
+from ._streaming import ReadIterator
+from ._validation import integer
 from .geometry import Interpolation, read_aligned_patch
 from .io.base import SlideReader
-from .types import Patch, PatchRequest, SlideMetadata
+from .reading import read_physical_patch_result
+from .sampling_plan import DEFAULT_LIMITS
+from .types import (
+    Patch,
+    PatchRequest,
+    PhysicalPatchRequest,
+    PhysicalPatchResult,
+    SamplingLimits,
+    SlideMetadata,
+)
 
 
 class PatchStream(Iterable[Patch]):
@@ -33,23 +40,20 @@ class PatchStream(Iterable[Patch]):
         num_workers: int = 1,
         max_pending: int | None = None,
         reader_factory: Callable[[], SlideReader] | None = None,
+        own_requests: bool = False,
     ) -> None:
         if interpolation not in ("nearest", "bilinear", "area"):
             raise ValueError("interpolation must be 'nearest', 'bilinear', or 'area'")
-        if isinstance(num_workers, bool) or not isinstance(num_workers, int):
-            raise ValueError("num_workers must be a positive integer")
-        if num_workers < 1:
-            raise ValueError("num_workers must be a positive integer")
+        num_workers = integer(num_workers, "num_workers", minimum=1)
         if max_pending is None:
             max_pending = 2 * num_workers
-        if (
-            isinstance(max_pending, bool)
-            or not isinstance(max_pending, int)
-            or max_pending < 1
-        ):
-            raise ValueError("max_pending must be a positive integer")
+        max_pending = integer(max_pending, "max_pending", minimum=1)
+        if not isinstance(own_requests, bool):
+            raise ValueError("own_requests must be bool")
         if reader is not None and reader_factory is not None:
             raise ValueError("provide either reader or reader_factory")
+        if reader_factory is not None and not callable(reader_factory):
+            raise ValueError("reader_factory must be callable")
         if reader is None and reader_factory is None:
             raise ValueError("reader or reader_factory is required")
         if num_workers > 1 and reader_factory is None:
@@ -61,6 +65,7 @@ class PatchStream(Iterable[Patch]):
         self.num_workers = num_workers
         self.max_pending = max_pending
         self.reader_factory = reader_factory
+        self.own_requests = own_requests
 
     def _read(
         self,
@@ -68,6 +73,11 @@ class PatchStream(Iterable[Patch]):
         request: PatchRequest,
         metadata_cache: dict[tuple[str, tuple[float, float] | None], SlideMetadata],
     ) -> Patch:
+        if not isinstance(request, PatchRequest):
+            raise ValueError(
+                "request must be PatchRequest; "
+                "use PhysicalPatchStream for physical requests"
+            )
         key = request.slide, request.source_mpp
         metadata = metadata_cache.get(key)
         if metadata is None:
@@ -85,49 +95,52 @@ class PatchStream(Iterable[Patch]):
         )
 
     def __iter__(self) -> Iterator[Patch]:
-        if self.num_workers == 1:
-            with ExitStack() as resources:
-                reader = self.reader
-                if self.reader_factory is not None:
-                    reader = self.reader_factory()
-                    resources.callback(reader.close)
-                assert reader is not None
-                metadata_cache: dict[
-                    tuple[str, tuple[float, float] | None], SlideMetadata
-                ] = {}
-                for request in self.requests:
-                    yield self._read(reader, request, metadata_cache)
-            return
+        return ReadIterator(self)
 
-        state = local()
-        readers: list[SlideReader] = []
 
-        def read(request: PatchRequest) -> Patch:
-            if not hasattr(state, "reader"):
-                assert self.reader_factory is not None
-                state.reader = self.reader_factory()
-                readers.append(state.reader)
-                state.metadata_cache = {}
-            return self._read(state.reader, request, state.metadata_cache)
+class PhysicalPatchStream(PatchStream):
+    """Ordered full physical results; per-request options reach the sync API.
 
-        pending: deque[Future[Patch]] = deque()
-        executor = ThreadPoolExecutor(max_workers=self.num_workers)
-        try:
-            requests = iter(self.requests)
-            for _ in range(self.max_pending):
-                request = next(requests, None)
-                if request is None:
-                    break
-                pending.append(executor.submit(read, request))
-            while pending:
-                yield pending.popleft().result()
-                request = next(requests, None)
-                if request is not None:
-                    pending.append(executor.submit(read, request))
-        finally:
-            for future in pending:
-                future.cancel()
-            executor.shutdown(wait=True, cancel_futures=True)
-            with ExitStack() as resources:
-                for reader in readers:
-                    resources.callback(reader.close)
+    Factory-owned readers are created/read/closed on their owning worker.
+    Request iterators are borrowed unless own_requests=True. Use
+    contextlib.closing(iter(stream)) for early exit. Ordered waiting can delay
+    later failures; close waits for started native IO and cancels queued work.
+    """
+
+    def __init__(
+        self,
+        reader: SlideReader | None,
+        requests: Iterable[PhysicalPatchRequest],
+        *,
+        reader_factory: Callable[[], SlideReader] | None = None,
+        num_workers: int = 1,
+        max_pending: int | None = None,
+        limits: SamplingLimits = DEFAULT_LIMITS,
+        own_requests: bool = False,
+    ) -> None:
+        if not isinstance(limits, SamplingLimits):
+            raise ValueError("limits must be SamplingLimits")
+        super().__init__(
+            reader,
+            requests,
+            reader_factory=reader_factory,
+            num_workers=num_workers,
+            max_pending=max_pending,
+            own_requests=own_requests,
+        )
+        self.limits = limits
+
+    def _read(self, reader, request, metadata_cache) -> PhysicalPatchResult:
+        if not isinstance(request, PhysicalPatchRequest):
+            raise ValueError("request must be a PhysicalPatchRequest")
+        key = request.slide, request.source_mpp
+        metadata = metadata_cache.get(key)
+        if metadata is None:
+            metadata = reader.metadata(request.slide, source_mpp=request.source_mpp)
+            metadata_cache[key] = metadata
+        return read_physical_patch_result(
+            reader, request, metadata=metadata, limits=self.limits
+        )
+
+    def __iter__(self) -> Iterator[PhysicalPatchResult]:
+        return ReadIterator(self)
