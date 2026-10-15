@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import argparse
 import asyncio
 import threading
 import time
+from io import BytesIO
 from pathlib import Path
 
 import numpy as np
@@ -17,6 +19,7 @@ from wsi_patchkit import LevelInfo, SlideMetadata, TiffReader  # noqa: E402
 from wsi_patchkit.web import SlideRegistry, TileWorkerPool, create_app  # noqa: E402
 from wsi_patchkit.web.__main__ import (  # noqa: E402
     SlideDirectoryScanner,
+    _source_mpp,
     discover_overlays,
     discover_slides,
 )
@@ -46,6 +49,46 @@ def test_registry_rejects_unsafe_ids(tmp_path: Path) -> None:
 
     with pytest.raises(ValueError, match="slide IDs"):
         SlideRegistry({"../private": path})
+
+
+@pytest.mark.parametrize("value,expected", [("0.25", (0.25, 0.25)),
+                                           ("0.25,0.5", (0.25, 0.5))])
+def test_cli_source_mpp(value, expected):
+    assert _source_mpp(value) == expected
+
+
+@pytest.mark.parametrize("value", ["0", "-1", "nan", "inf", "", "1,2,3"])
+def test_cli_source_mpp_rejects_invalid_values(value):
+    with pytest.raises(argparse.ArgumentTypeError):
+        _source_mpp(value)
+
+
+@pytest.mark.anyio
+async def test_default_mpp_survives_scans_and_applies_to_uploads(tmp_path: Path):
+    directory = tmp_path / "images"
+    directory.mkdir()
+    image = directory / "ordinary.png"
+    Image.new("RGB", (8, 8)).save(image)
+    scanner = SlideDirectoryScanner([directory], interval=0)
+    app = create_app(
+        scanner.refresh(), slide_scanner=scanner, source_mpp=(0.25, 0.5),
+        upload_dir=tmp_path / "uploads",
+    )
+    async with app.router.lifespan_context(app), httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="http://testserver",
+    ) as client:
+        for _ in range(2):
+            await client.get("/api/slides")
+            result = await client.get("/api/slides/ordinary.png")
+            assert result.json()["mpp"] == [0.25, 0.5]
+        result = await client.post(
+            "/api/slides/upload", params={"filename": "uploaded.png"},
+            content=image.read_bytes(),
+        )
+        assert result.status_code == 201
+        slide_id = result.json()["id"]
+        metadata = (await client.get(f"/api/slides/{slide_id}")).json()
+        assert metadata["mpp"] == [0.25, 0.5]
 
 
 def test_discover_slides_recurses_filters_and_creates_unique_ids(
@@ -270,11 +313,13 @@ def test_discover_overlays_uses_manifest_ids_and_source_stem_aliases(
     unmatched = overlay_root / "other_prediction"
     matching.mkdir(parents=True)
     unmatched.mkdir()
-    (matching / "prediction.json").touch()
-    (unmatched / "prediction.json").touch()
+    for directory in (matching, unmatched):
+        (directory / "prediction.json").write_text(
+            '{"schema":"wsi-patchkit-overlay/v1"}', encoding="utf-8"
+        )
 
-    # Loading is intentionally mocked here: discovery owns root traversal and
-    # manifest-to-slide routing; schema validation is covered in test_overlays.
+    # Discovery reads the schema discriminator. Full raster loading is mocked:
+    # routing is tested here and validation is covered in test_overlays.
     import wsi_patchkit.web.overlays as overlay_module
 
     class Manifest:
@@ -328,6 +373,59 @@ async def _wait_for_crop(client, slide_id: str, job_id: str) -> dict[str, object
             return result
         await asyncio.sleep(0.01)
     pytest.fail("crop job did not finish")
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("extension", ["png", "jpg", "bmp", "webp"])
+async def test_ordinary_image_upload_view_and_crop(
+    tmp_path: Path, extension: str,
+) -> None:
+    path = tmp_path / f"ordinary.{extension}"
+    pixels = np.arange(16 * 20 * 3, dtype=np.uint8).reshape(16, 20, 3)
+    Image.fromarray(pixels).save(path)
+    with Image.open(path) as image:
+        expected = np.array(image.convert("RGB"))
+    assert path in discover_slides([tmp_path]).values()
+    uploads = tmp_path / "uploads"
+    output = tmp_path / "crops"
+    app = create_app({}, upload_dir=uploads, crop_output_dir=output)
+    transport = httpx.ASGITransport(app=app)
+    async with app.router.lifespan_context(app), httpx.AsyncClient(
+        transport=transport, base_url="http://testserver",
+    ) as client:
+        response = await client.post(
+            "/api/slides/upload", params={"filename": path.name},
+            content=path.read_bytes(),
+        )
+        assert response.status_code == 201
+        slide_id = response.json()["id"]
+        metadata = (await client.get(f"/api/slides/{slide_id}")).json()
+        assert (metadata["width"], metadata["height"]) == (20, 16)
+        assert metadata["mpp"] is None
+        assert len(metadata["levels"]) == 1
+        info = await client.get(f"/iiif/3/{slide_id}/info.json")
+        assert info.status_code == 200
+        tile = await client.get(f"/iiif/3/{slide_id}/full/max/0/default.png")
+        assert tile.status_code == 200
+        with Image.open(BytesIO(tile.content)) as image:
+            np.testing.assert_array_equal(np.array(image), expected)
+        response = await client.post(
+            f"/api/slides/{slide_id}/crops",
+            json={"x": 3, "y": 4, "width": 6, "height": 5,
+                  "format": "png", "filename": "ordinary-crop.png"},
+        )
+        assert response.status_code == 202
+        completed = await _wait_for_crop(client, slide_id, response.json()["job_id"])
+        assert completed["status"] == "completed"
+    with Image.open(output / "ordinary-crop.png") as image:
+        np.testing.assert_array_equal(np.array(image), expected[4:9, 3:9])
+
+    restarted = create_app({}, upload_dir=uploads)
+    transport = httpx.ASGITransport(app=restarted)
+    async with restarted.router.lifespan_context(restarted), httpx.AsyncClient(
+        transport=transport, base_url="http://testserver",
+    ) as client:
+        assert (await client.get(f"/api/slides/{slide_id}")).status_code == 200
 
 
 @pytest.mark.anyio

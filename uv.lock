@@ -542,13 +542,13 @@ wheels = [
 [[package]]
 name = "kfbslide"
 version = "0.3.3"
-source = { registry = "https://pypi.org/simple" }
+source = { registry = "https://mirrors.aliyun.com/pypi/simple/" }
 dependencies = [
     { name = "pillow" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/b1/2f/4cf44708586ead17d68942baa6198f619aedcd5cc19f820ca1185dd5245c/kfbslide-0.3.3.tar.gz", hash = "sha256:ebfb7b0a815f22197cdff453752a5a2a3c101a1b1816520a843cad951d43ba07", size = 22643, upload-time = "2026-09-25T08:38:09.284Z" }
+sdist = { url = "https://mirrors.aliyun.com/pypi/packages/b1/2f/4cf44708586ead17d68942baa6198f619aedcd5cc19f820ca1185dd5245c/kfbslide-0.3.3.tar.gz", hash = "sha256:ebfb7b0a815f22197cdff453752a5a2a3c101a1b1816520a843cad951d43ba07" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/5a/47/0c54d9b0b1a12243c75f35ed8e6f953fd47a3a4b5c4df9e21d07c897697b/kfbslide-0.3.3-py3-none-any.whl", hash = "sha256:3dd3479117a65cf4d0b68ffa12f4c8e852390869b3a9d307b90ef5415fada626", size = 16919, upload-time = "2026-09-25T08:38:07.422Z" },
+    { url = "https://mirrors.aliyun.com/pypi/packages/5a/47/0c54d9b0b1a12243c75f35ed8e6f953fd47a3a4b5c4df9e21d07c897697b/kfbslide-0.3.3-py3-none-any.whl", hash = "sha256:3dd3479117a65cf4d0b68ffa12f4c8e852390869b3a9d307b90ef5415fada626" },
 ]
 
 [[package]]
@@ -2162,7 +2162,7 @@ wheels = [
 
 [[package]]
 name = "wsi-patchkit"
-version = "0.1.0"
+version = "0.2.0"
 source = { editable = "." }
 dependencies = [
     { name = "kfbslide" },

@@ -2,6 +2,53 @@
 
 ## Unreleased
 
+### 0.2.0 — phase 1 physical sampling plans
+
+- Added strict `PhysicalPatchRequest`, `OutputGrid`, `SamplingLimits`, and
+  `SamplingPlan`, including center affines and explicit legacy conversion.
+- Added IO-free `plan_physical_read` with per-request level/policy, native
+  neighborhood bounds, constant/reflect planning, area footprint budgets,
+  overflow checks, and output/read pixel limits before allocation or IO.
+- Added shared `round`/`ceil` canvas policies carried from slide specifications
+  through grid/random/tissue samplers and aligned read helpers.
+- Added `FutureWarning` for implicit legacy integer conversions and bool MPP;
+  these inputs will be rejected in 0.3.0. Fractional MPP remains valid.
+- Reject invalid explicit helper levels and policies before region IO.
+- Preserved legacy pixel snapshots and `Patch(request, image)` construction.
+  Exact pixel resampling and physical result streams remain later milestones.
+
+### 0.2.0 — phase 2 exact synchronous reads
+
+- Added `read_physical_patch_result` and `PhysicalPatchResult` with owned
+  images, HW physical-center valid masks, output grids, actual native levels,
+  and sampling plans; supplied plans are checked against metadata and limits.
+- Implemented center-based nearest and float64 bilinear with constant fill,
+  native-edge clamp, fixed uint8 rounding, and zero pixel IO for outside reads.
+- Added strict reader-array checks, grayscale/RGBA RGB conversion, and exact
+  native bool/integer nearest reads, including uint64 labels.
+- Verified independent gradient/impulse references, strip-boundary sampling,
+  PNG/noninteger TIFF pyramids, and legacy pixel snapshots. Bicubic, area,
+  reflect, and physical streams remain phases 3–4.
+
+### 0.2.0 — phase 3 interpolation and padding
+
+- Added separable Keys bicubic (`a=-0.5`) and full native-axis reflect mapping
+  for every RGB kernel and native nearest, including one-pixel axes and far origins.
+- Added physical-footprint area weights with fractional phase, clamp/reflect
+  edges, bulk reflected-cell counting, and stable half-value quantization.
+- Applied output/read limits and address-space checks to all supported modes;
+  collapsed area footprints fail during planning before IO.
+- Sampling plans now include native dimensions for full-axis boundary mapping;
+  completely outside native requests require reliable pixel-format metadata.
+- Extended independent reference tests with rational area arithmetic, real
+  PNG/TIFF modes, extreme coordinates, and all kernel/padding limit combinations.
+
+### Other changes
+
+- Added detection-manifest registration, disk-backed spatial indexing, and
+  high-magnification local point rendering with adjustable radius, class
+  colors, filled/hollow styles, and opacity.
+
 - Added browser slide upload with validation, immediate listing, persistent
   server-side storage, and a dedicated Docker volume.
 - Renamed domain-level sampling APIs to `*PatchRequestSampler` and the PyTorch

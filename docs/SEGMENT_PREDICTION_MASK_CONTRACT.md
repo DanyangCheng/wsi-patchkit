@@ -1,7 +1,7 @@
-# Segment → WSI Patchkit 预测 Mask 交付契约
+# Segment推理端 → WSI Patchkit 预测 Mask 交付契约
 
-状态：Draft v1<br>
-适用范围：Segment 将局部或完整 WSI 分割结果交给 WSI Patchkit 展示<br>
+状态：v1
+适用范围：上游Segment推理框架将局部或完整 WSI 分割结果交给 WSI Patchkit 展示
 规范关键词：`必须`、`不得`、`应当`、`可以`
 
 ## 1. 目标与边界
@@ -86,7 +86,7 @@ coverage 只表示“是否存在预测”，不得用来表达：
 "full_coverage": true
 ```
 
-`coverage` 与 `full_coverage: true` 不得同时出现。未提供 coverage 时，也未声明 `full_coverage: true`，Patchkit 必须拒绝注册。
+`coverage` 与 `full_coverage: true` 不得同时出现。未提供 coverage 时，也未声明 `full_coverage: true`，Patchkit 拒绝注册。
 
 ## 5. 为什么必须区分 prediction 和 coverage
 
@@ -177,31 +177,31 @@ Segment 不得仅依赖 mask 尺寸让 Patchkit猜测其与 WSI 的对应关系�
 
 ### 7.1 顶层字段
 
-| 字段 | 必需 | 约束 |
-| --- | --- | --- |
-| `schema` | 是 | 当前必须为 `wsi-patchkit-overlay/v1` |
-| `slide_id` | 是 | 必须匹配 Patchkit 中已注册的 WSI |
-| `overlay_id` | 是 | 在同一 WSI 内必须唯一 |
-| `display_name` | 否 | 浏览器显示名称；省略时使用 `overlay_id` |
-| `encoding` | 是 | 本契约必须为 `indexed` |
-| `default_opacity` | 否 | 0–1，默认为 0.7 |
-| `initially_visible` | 否 | 布尔值，默认为 false |
-| `classes` | 是 | 类别 ID 必须唯一，RGBA 每项必须在 0–255 |
-| `fragments` | 是 | 至少包含一个片段 |
+| 字段                  | 必需 | 约束                                     |
+| --------------------- | ---- | ---------------------------------------- |
+| `schema`            | 是   | 当前必须为`wsi-patchkit-overlay/v1`    |
+| `slide_id`          | 是   | 必须匹配 Patchkit 中已注册的 WSI         |
+| `overlay_id`        | 是   | 在同一 WSI 内必须唯一                    |
+| `display_name`      | 否   | 浏览器显示名称；省略时使用`overlay_id` |
+| `encoding`          | 是   | 本契约必须为`indexed`                  |
+| `default_opacity`   | 否   | 0–1，默认为 0.7                         |
+| `initially_visible` | 否   | 布尔值，默认为 false                     |
+| `classes`           | 是   | 类别 ID 必须唯一，RGBA 每项必须在 0–255 |
+| `fragments`         | 是   | 至少包含一个片段                         |
 
 类别名称仅用于 legend 展示，由 Segment 定义；Patchkit 不解释名称含义。
 
 ### 7.2 Fragment 字段
 
-| 字段 | 必需 | 约束 |
-| --- | --- | --- |
-| `prediction` | 是 | indexed TIFF 相对路径 |
-| `coverage` | 条件必需 | `full_coverage` 不为 true 时必须提供 |
-| `full_coverage` | 是 | 布尔值 |
-| `origin_um` | 是 | 两个有限数值 |
-| `mpp` | 是 | 两个有限正数 |
-| `dimensions` | 是 | 两个正整数，顺序为 width、height |
-| `revision` | 是 | 文件内容变化时必须变化，用于缓存失效 |
+| 字段              | 必需     | 约束                                   |
+| ----------------- | -------- | -------------------------------------- |
+| `prediction`    | 是       | indexed TIFF 相对路径                  |
+| `coverage`      | 条件必需 | `full_coverage` 不为 true 时必须提供 |
+| `full_coverage` | 是       | 布尔值                                 |
+| `origin_um`     | 是       | 两个有限数值                           |
+| `mpp`           | 是       | 两个有限正数                           |
+| `dimensions`    | 是       | 两个正整数，顺序为 width、height       |
+| `revision`      | 是       | 文件内容变化时必须变化，用于缓存失效   |
 
 第一版中 fragment 应当互不重叠。若存在重叠，Segment 必须先完成融合再输出；Patchkit 不根据类别或概率解决冲突。
 

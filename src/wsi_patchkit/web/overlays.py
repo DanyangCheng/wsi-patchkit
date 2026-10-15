@@ -12,6 +12,7 @@ from dataclasses import dataclass, field
 from io import BytesIO
 from pathlib import Path
 from types import MappingProxyType
+from typing import TYPE_CHECKING
 
 import numpy as np
 import tifffile
@@ -22,6 +23,9 @@ from ..io import TiffReader
 from ..tiles import EncodedImage, SlideReaderPool, choose_level_for_downsample
 from ..types import MPP, Size, SlideMetadata, as_mpp, as_size
 from .registry import valid_public_id
+
+if TYPE_CHECKING:
+    from .detections import DetectionOverlay
 
 RGBA = tuple[int, int, int, int]
 
@@ -169,10 +173,9 @@ def _bounds_overlap(
     first: tuple[float, float, float, float],
     second: tuple[float, float, float, float],
 ) -> bool:
-    return (
-        max(first[0], second[0]) < min(first[2], second[2])
-        and max(first[1], second[1]) < min(first[3], second[3])
-    )
+    return max(first[0], second[0]) < min(first[2], second[2]) and max(
+        first[1], second[1]
+    ) < min(first[3], second[3])
 
 
 @dataclass(frozen=True, slots=True)
@@ -241,11 +244,9 @@ class IndexedOverlay:
             for source in (fragment.source, fragment.coverage):
                 if source is not None:
                     stat = Path(source.path).stat()
-                    fingerprint.extend((
-                        str(source.path),
-                        stat.st_size,
-                        stat.st_mtime_ns
-                        ))
+                    fingerprint.extend(
+                        (str(source.path), stat.st_size, stat.st_mtime_ns)
+                    )
         return hashlib.sha256(repr(fingerprint).encode("utf-8")).hexdigest()[:16]
 
     def public_metadata(self) -> dict[str, object]:
@@ -285,7 +286,7 @@ class OverlayRegistry:
         self,
         overlays: Mapping[
             str,
-            Mapping[str, IndexedOverlay | str | Path],
+            Mapping[str, IndexedOverlay | DetectionOverlay | str | Path],
         ]
         | None,
         *,
@@ -294,37 +295,41 @@ class OverlayRegistry:
     ) -> None:
         registered_slides = set(slide_ids)
         aliases = dict(manifest_slide_id_aliases or {})
-        sources: dict[str, dict[str, IndexedOverlay]] = {}
+        sources: dict[str, dict[str, IndexedOverlay | DetectionOverlay]] = {}
         for slide_id, slide_overlays in (overlays or {}).items():
             if slide_id not in registered_slides:
                 raise ValueError(f"overlay references unknown slide {slide_id!r}")
-            current: dict[str, IndexedOverlay] = {}
+            current: dict[str, IndexedOverlay | DetectionOverlay] = {}
             for overlay_id, value in slide_overlays.items():
                 overlay = (
-                    load_indexed_overlay_manifest(value)
+                    load_overlay_manifest(value)
                     if isinstance(value, (str, Path))
                     else value
                 )
                 manifest_slide_id = aliases.get(overlay.slide_id, overlay.slide_id)
-                if (
-                    manifest_slide_id != slide_id
-                    or overlay.overlay_id != overlay_id
-                ):
+                if manifest_slide_id != slide_id or overlay.overlay_id != overlay_id:
                     raise ValueError("overlay registry keys must match manifest IDs")
                 current[overlay_id] = overlay
             sources[slide_id] = current
         self._sources = sources
 
-    def for_slide(self, slide_id: str) -> Mapping[str, IndexedOverlay]:
+    def for_slide(
+        self, slide_id: str
+    ) -> Mapping[str, IndexedOverlay | DetectionOverlay]:
         return MappingProxyType(self._sources.get(slide_id, {}))
 
-    def get(self, slide_id: str, overlay_id: str) -> IndexedOverlay:
+    def get(self, slide_id: str, overlay_id: str) -> IndexedOverlay | DetectionOverlay:
         return self._sources[slide_id][overlay_id]
 
-    def __iter__(self) -> Iterator[tuple[str, IndexedOverlay]]:
+    def __iter__(self) -> Iterator[tuple[str, IndexedOverlay | DetectionOverlay]]:
         for slide_id, overlays in self._sources.items():
             for overlay in overlays.values():
                 yield slide_id, overlay
+
+    def close(self) -> None:
+        for _, overlay in self:
+            if hasattr(overlay, "close"):
+                overlay.close()
 
 
 def _manifest_path(base: Path, value: object, *, name: str) -> Path:
@@ -352,6 +357,19 @@ def _pair(value: object, *, name: str, integer: bool = False) -> tuple:
         return tuple(float(item) for item in value)
     except (TypeError, ValueError) as error:
         raise ValueError(f"{name} must contain two numbers") from error
+
+
+def load_overlay_manifest(path: str | Path) -> IndexedOverlay | DetectionOverlay:
+    """Dispatch raster and object prediction manifests by explicit schema."""
+    from .detections import load_detection_overlay_manifest
+
+    payload = json.loads(Path(path).read_text(encoding="utf-8"))
+    if (
+        isinstance(payload, dict)
+        and payload.get("schema") == "wsi-patchkit-detection/v1"
+    ):
+        return load_detection_overlay_manifest(path)
+    return load_indexed_overlay_manifest(path)
 
 
 def load_indexed_overlay_manifest(path: str | Path) -> IndexedOverlay:
@@ -395,15 +413,11 @@ def load_indexed_overlay_manifest(path: str | Path) -> IndexedOverlay:
         if not isinstance(full_coverage, bool):
             raise ValueError("fragment full_coverage must be a boolean")
         if full_coverage == (coverage_value is not None):
-            raise ValueError(
-                "provide coverage or set full_coverage=true, but not both"
-            )
+            raise ValueError("provide coverage or set full_coverage=true, but not both")
         geometry = OverlayGeometry(
             origin_um=_pair(item.get("origin_um"), name="origin_um"),
             mpp=_pair(item.get("mpp"), name="mpp"),
-            dimensions=_pair(
-                item.get("dimensions"), name="dimensions", integer=True
-            ),
+            dimensions=_pair(item.get("dimensions"), name="dimensions", integer=True),
         )
         source = TiffRasterSource(
             _manifest_path(base, item.get("prediction"), name="prediction")
@@ -569,21 +583,11 @@ class OverlayRenderer:
                 source_y = np.floor(
                     (y_centres[output_y] - y0) / fragment.geometry.mpp[1]
                 ).astype(np.int64)
-                np.clip(
-                    source_x, 0, fragment.geometry.dimensions[0] - 1, out=source_x
-                )
-                np.clip(
-                    source_y, 0, fragment.geometry.dimensions[1] - 1, out=source_y
-                )
+                np.clip(source_x, 0, fragment.geometry.dimensions[0] - 1, out=source_x)
+                np.clip(source_y, 0, fragment.geometry.dimensions[1] - 1, out=source_y)
                 requested_downsample = (
-                    width
-                    * slide_mpp[0]
-                    / output_width
-                    / fragment.geometry.mpp[0],
-                    height
-                    * slide_mpp[1]
-                    / output_height
-                    / fragment.geometry.mpp[1],
+                    width * slide_mpp[0] / output_width / fragment.geometry.mpp[0],
+                    height * slide_mpp[1] / output_height / fragment.geometry.mpp[1],
                 )
                 if fragment.coverage is None:
                     coverage = None

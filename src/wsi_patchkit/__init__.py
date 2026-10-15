@@ -2,6 +2,7 @@
 
 from importlib.metadata import PackageNotFoundError, version
 
+from ._canvas import CanvasRounding
 from .geometry import (
     Interpolation,
     LevelSelectionPolicy,
@@ -15,11 +16,13 @@ from .geometry import (
 )
 from .io import (
     AutoSlideReader,
+    ImageReader,
     KfbSlideReader,
     OpenSlideReader,
     SlideReader,
     TiffReader,
 )
+from .reading import read_physical_patch_result
 from .sampling import (
     GridPatchRequestSampler,
     IndexedPatchRequestSampler,
@@ -31,7 +34,8 @@ from .sampling import (
     TissueRandomPatchRequestSampler,
     axis_positions,
 )
-from .stream import PatchStream
+from .sampling_plan import plan_physical_read
+from .stream import PatchStream, PhysicalPatchStream
 from .tiles import (
     EncodedImage,
     SlideReaderPool,
@@ -42,10 +46,15 @@ from .tiles import (
 from .types import (
     MPP,
     LevelInfo,
+    OutputGrid,
     Patch,
     PatchRequest,
+    PhysicalPatchRequest,
+    PhysicalPatchResult,
     PixelFormat,
     SamplingContext,
+    SamplingLimits,
+    SamplingPlan,
     Size,
     SlideMetadata,
     SlideSpec,
@@ -56,15 +65,25 @@ from .types import (
 try:
     __version__ = version("wsi-patchkit")
 except PackageNotFoundError:
-    __version__ = "0.1.0"
+    __version__ = "0.2.0"
 
 __all__ = [
     "MPP",
+    "CanvasRounding",
+    "PhysicalPatchRequest",
+    "PhysicalPatchResult",
+    "PhysicalPatchStream",
+    "read_physical_patch_result",
+    "OutputGrid",
+    "SamplingLimits",
+    "SamplingPlan",
+    "plan_physical_read",
     "Size",
     "AutoSlideReader",
     "EncodedImage",
     "GridPatchRequestSampler",
     "IndexedPatchRequestSampler",
+    "ImageReader",
     "Interpolation",
     "KfbSlideReader",
     "LevelSelectionPolicy",

@@ -10,6 +10,7 @@ from numpy.typing import NDArray
 
 from ..types import SlideMetadata
 from .base import SlideReader
+from .image import IMAGE_EXTENSIONS, ImageReader
 from .kfbslide import KfbSlideReader
 from .openslide import OpenSlideReader
 from .tiff import TiffReader
@@ -19,7 +20,7 @@ _KFB_SUFFIXES = {".kfb"}
 
 
 class AutoSlideReader:
-    """Route TIFF to tifffile, KFB to kfbslide, and other WSIs to OpenSlide.
+    """Route ordinary images to Pillow and WSIs to their respective backends.
 
     Optional readers are imported lazily, so TIFF-only applications do not need
     their additional dependencies.
@@ -36,6 +37,7 @@ class AutoSlideReader:
         self.kfb_index_cache_dir = kfb_index_cache_dir
         self.kfb_tile_cache_size = kfb_tile_cache_size
         self._tiff = TiffReader(cache_size=cache_size)
+        self._image: ImageReader | None = None
         self._kfb: KfbSlideReader | None = None
         self._openslide: OpenSlideReader | None = None
         self._tiff_routes: dict[str, bool] = {}
@@ -55,6 +57,10 @@ class AutoSlideReader:
             return bool(tif.is_svs or description.lstrip().startswith("Aperio"))
 
     def _reader(self, path: str | Path) -> SlideReader:
+        if Path(path).suffix.lower() in IMAGE_EXTENSIONS:
+            if self._image is None:
+                self._image = ImageReader(cache_size=self.cache_size)
+            return self._image
         if Path(path).suffix.lower() in _KFB_SUFFIXES:
             if self._kfb is None:
                 self._kfb = KfbSlideReader(
@@ -94,6 +100,9 @@ class AutoSlideReader:
 
     def close(self) -> None:
         self._tiff.close()
+        if self._image is not None:
+            self._image.close()
+            self._image = None
         self._tiff_routes.clear()
         if self._kfb is not None:
             self._kfb.close()

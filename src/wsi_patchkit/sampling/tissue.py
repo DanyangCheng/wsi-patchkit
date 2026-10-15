@@ -200,6 +200,7 @@ class TissueRandomPatchRequestSampler:
                     slide.target_mpp,
                     source_mpp=slide.source_mpp,
                     fill_value=self.fill_value,
+                    canvas_rounding=slide.canvas_rounding,
                 )
                 if self.masks[slide.path].fraction(request) >= self.minimum_fraction:
                     yield request

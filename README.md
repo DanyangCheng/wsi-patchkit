@@ -1,10 +1,12 @@
 # wsi-patchkit
 
 `wsi-patchkit` is a small, backend-neutral library for reading patches from
-whole-slide images (WSIs). Version 0.1 provides:
+whole-slide images (WSIs). Version 0.2 provides:
 
-- TIFF, KFB, and OpenSlide readers with a common coordinate contract;
+- ordinary image (Pillow), TIFF, KFB, and OpenSlide readers with a common coordinate contract;
 - physical-resolution (MPP) metadata and level selection;
+- strict continuous physical requests, output grids, and IO-free sampling plans;
+- exact synchronous nearest/bilinear/bicubic/area reads with physical-center valid masks;
 - target-MPP-aligned, boundary-padded patch reads;
 - deterministic grid, random, indexed, and tissue-filtered sampling;
 - lazy patch streams;
@@ -14,25 +16,144 @@ whole-slide images (WSIs). Version 0.1 provides:
 Dataset manifests, labels, augmentation, model execution, and prediction output
 formats intentionally remain application concerns.
 
+## Physical sampling plans
+
+Phase 1 exposes `PhysicalPatchRequest`, `OutputGrid`, `SamplingLimits`,
+`SamplingPlan`, and `plan_physical_read`. Planning preserves negative and
+fractional origins, selects the native level, and budgets one native region
+without reading or allocating pixel arrays. Exact synchronous reads support
+nearest/bilinear/bicubic/area with constant or reflect padding. Complete
+physical result streams are scheduled for phase 4.
+
+```python
+from wsi_patchkit import ImageReader, PhysicalPatchRequest, SamplingLimits, plan_physical_read
+
+request = PhysicalPatchRequest(
+    "slide.png",
+    origin_um=(0.125, -0.5),
+    output_size=(256, 128),  # width, height
+    target_mpp=(0.5, 0.75),
+    source_mpp=(0.25, 0.5),
+    level_policy="finer",   # an explicit level takes precedence
+    interpolation="bilinear",
+    fill_value=(255, 255, 255),
+)
+with ImageReader() as reader:
+    metadata = reader.metadata(request.slide, source_mpp=request.source_mpp)
+    plan = plan_physical_read(metadata, request, limits=SamplingLimits())
+
+print(plan.source_level, plan.read_location, plan.read_size)
+print(plan.grid.output_to_slide_um)  # [col, row, 1] -> pixel center in micrometres
+```
+
+Supplied metadata must match the slide path and any `source_mpp` override.
+Defaults cap output pixels at 16,777,216 and native read pixels at 67,108,864,
+including interpolation neighbors and unused pixels inside the read rectangle.
+Set either limit to `None` independently to disable it. `0` is invalid. The
+planner retains zero-weight point-kernel neighbors in its budget. Constant
+planning uses scalar searches; reflect planning uses at most O(width + height)
+scalar work and O(1) auxiliary memory. Neither allocates an HW coordinate array.
+
+The new request rejects bool, fractional or floating-point integer fields,
+nonfinite coordinates, and nonpositive MPP. Physical coordinates and MPP may
+be fractional; integer fields accept Python and NumPy integers. Native mode
+requires nearest. Area planning requires both axes to avoid enlargement and
+follows physical footprint weights; it does not invoke the legacy BOX resize.
+See the [sampling contract](docs/PHYSICAL_SAMPLING_CONTRACT.md) for details.
+
+Use `PhysicalPatchRequest.from_legacy(request)` to convert an old request's
+origin to `(x * target_mpp_x, y * target_mpp_y)`. Previously truncated fractions
+cannot be recovered. Legacy fractional/bool integer inputs and bool MPP emit
+`FutureWarning` in 0.2.0 and will be rejected in 0.3.0. Valid integer inputs
+and old helper pixel results remain compatible.
+
+`SlideSpec.from_metadata(..., canvas_rounding="ceil")` propagates its strategy
+through grid, random, and tissue samplers into `PatchRequest`. Old helpers use
+the request's strategy, with an optional explicit `canvas_rounding` override;
+`virtual_canvas_size` accepts the same option. The default `"round"` retains
+ties-to-even behavior. Canvas coverage and exact physical-center validity are
+separate contracts.
+
+### Exact synchronous reads
+
+```python
+from wsi_patchkit import ImageReader, PhysicalPatchRequest, read_physical_patch_result
+
+request = PhysicalPatchRequest(
+    "slide.png",
+    origin_um=(0.125, -0.5),
+    output_size=(256, 128),
+    target_mpp=(0.5, 0.75),
+    source_mpp=(0.25, 0.5),
+    interpolation="bilinear",
+    padding_mode="constant",
+    fill_value=(255, 255, 255),
+)
+with ImageReader() as reader:
+    result = read_physical_patch_result(reader, request)
+
+print(result.image.shape, result.valid_mask.shape)  # (128, 256, 3), (128, 256)
+print(result.source_level, result.grid.output_to_slide_um)
+# Arrays remain valid after the reader closes.
+```
+
+Centers follow `origin_um + (col + 0.5, row + 0.5) * target_mpp`.
+`valid_mask` is HW bool and tests those centers against the level-0 physical
+half-open extent. Right/bottom boundary centers are invalid. An invalid center
+receives the entire constant fill; interpolation neighbors of valid centers
+clamp at native edges. A fully outside request makes no pixel IO calls.
+
+Nearest chooses `floor(s + 0.5)` in native center coordinates; bilinear uses
+float64 weights and `clip(floor(value + 0.5), 0, 255)` quantization. RGB requires
+uint8, expands grayscale, and composites RGBA on white before sampling.
+`color_mode="native"` requires nearest and preserves bool/integer dtype and
+channel count (2D data becomes HWC with one channel). Native fills must fit the
+source dtype; fully outside native requests require reliable `PixelFormat`
+metadata. Unsupported shape, dtype, or metadata/region mismatch raises an error.
+
+The same `SamplingLimits` apply to synchronous reads before output allocation
+and pixel IO. Supplied metadata can avoid repeated metadata queries. An optional
+`plan=plan` is verified against metadata/request/limits before IO; when planning
+with custom limits, pass `limits=plan.limits` to the read too. Results contain
+`request/image/valid_mask/grid/source_level/plan`, and both arrays own their data.
+The synchronous reader is borrowed and remains caller-owned on success or error.
+
+RGB sampling supports:
+
+| Kernel | Sampling rule |
+| --- | --- |
+| nearest | Center index `floor(s + 0.5)` |
+| bilinear | Two neighbors per axis, float64 separable weights |
+| bicubic | Four neighbors per axis, Keys cubic with `a=-0.5`, no added antialias filter |
+| area | Physical footprint overlap weights; both target MPP axes must be at least the selected native MPP |
+
+Each kernel accepts `padding_mode="constant"` or `"reflect"`. Reflect maps
+each native kernel neighbor on the entire original axis, with NumPy's
+nonrepeating endpoint rule; a one-pixel axis repeats its sole pixel. Entirely
+outside reflect requests may read the mapped native region, but their center
+masks remain false. Far origins and very wide area footprints use integer
+period mapping and bulk cell counts, so their distance does not enlarge IO.
+Native mode still permits only nearest and requires reliable pixel-format
+metadata for completely outside requests under either padding mode.
+
+Area uses the output pixel's physical rectangle, includes all overlapping
+native cells, and preserves fractional phase. Constant fills invalid centers
+as whole pixels; for valid centers its footprint beyond native edges clamps
+to edge pixels. Reflect folds each footprint cell. Coverage accumulates in
+float64 before normalization and uint8 quantization. Very large counts are
+scaled before multiplication to keep values finite. If floating precision
+collapses a footprint, planning rejects it before IO. All modes share the same
+output/read limits, including the actual single-region neighbor rectangle.
+
+The existing `read_aligned_patch*`, `PatchStream`, and torch adapter keep their
+legacy sampling path; physical result streams arrive in phase 4.
+
 ## Install
 
 The project is managed with `uv`:
 
 ```bash
 uv sync
-```
-
-Install the optional OpenSlide adapter when the native OpenSlide library is
-already available:
-
-```bash
-uv sync --extra openslide
-```
-
-For platforms supported by the `openslide-bin` wheel, the convenience extra is:
-
-```bash
-uv sync --extra openslide-binary
 ```
 
 PyTorch integration is isolated in another extra:
@@ -83,7 +204,7 @@ uv run wsi-patchkit-viewer --slide-dir /data/slides
 
 `--slide-dir` is repeatable and can be combined with `--slide`. Recognized file
 extensions are `.svs`, `.tif`, `.tiff`, `.kfb`, `.ndpi`, `.mrxs`, `.scn`,
-`.vms`, `.vmu`, `.bif`, and `.qptiff`.
+`.vms`, `.vmu`, `.bif`, `.qptiff`, `.jpg`, `.jpeg`, `.png`, `.bmp`, and `.webp`.
 The slide picker shows discovered files under their relative folders; folders
 can be expanded, and search matches both folder names and slide names.
 
@@ -95,12 +216,54 @@ to choose a persistent location. Uploads are limited to 32 GiB by default; set
 `--max-upload-gb N` to change the limit. The viewer can start without registered
 slides and accept its first slide through the browser. Supported upload
 extensions are `.svs`, `.tif`, `.tiff`, `.btf`, `.btiff`, `.kfb`, `.ndpi`,
-`.qptiff`, `.scn`, and `.bif`.
+`.qptiff`, `.scn`, `.bif`, `.jpg`, `.jpeg`, `.png`, `.bmp`, and `.webp`.
 
-Then open <http://127.0.0.1:8000>. The viewer supports mouse-wheel and pinch
+Then open [http://127.0.0.1:8000](http://127.0.0.1:8000). The viewer supports mouse-wheel and pinch
 zooming, drag panning, double-click zooming, a navigator, level-0 coordinates,
 and an MPP-aware scale bar. TIFF files use the bundled tifffile reader, `.kfb`
-files use `kfbslide`, and other formats are routed to the OpenSlide reader.
+files use `kfbslide`, ordinary images use Pillow, and other WSI formats use
+OpenSlide.
+
+### Ordinary images
+
+`AutoSlideReader` also reads JPEG, PNG, BMP, and WebP. They expose a single
+native level (`level=0`, `downsample=(1, 1)`) and work with the viewer's virtual
+zoom pyramid and server-side crops. EXIF orientation is applied consistently to
+metadata dimensions, displayed pixels, and crop coordinates. Animated WebP uses
+its first frame.
+
+The reader supports eight-bit grayscale, RGB, and RGBA. Bilevel images become
+grayscale; palette, grayscale-alpha, and CMYK images become RGB or RGBA as
+appropriate. Transparency is retained by the reader and composited onto white
+by the viewer. Higher-bit-depth images are rejected rather than silently reduced.
+
+Ordinary images have no MPP by default; display DPI is not treated as specimen
+resolution. Browsing and cropping work without MPP, while physical scale bars,
+physical-coordinate overlays, and target-MPP patch sampling require a known
+`source_mpp`:
+
+```python
+from wsi_patchkit import AutoSlideReader, SlideSpec
+
+with AutoSlideReader() as reader:
+    metadata = reader.metadata("image.png", source_mpp=0.5)
+    slide = SlideSpec.from_metadata(metadata, target_mpp=0.5)
+    region = reader.read_region("image.png", (10, 20), 0, (128, 128))
+```
+
+For the viewer, pass `--source-mpp 0.25` (or `--source-mpp 0.25,0.5` for
+an X/Y pair). This overrides embedded MPP for registered, scanned, and uploaded
+images. All images in that invocation should share the specified resolution.
+For images with detection overlays, use the actual source resolution matching
+`provenance.source_mpp` in the prediction manifest. The Python API accepts
+`create_app(..., source_mpp=0.25)`; a per-image `SlideSource.source_mpp` takes
+precedence over that default.
+
+`ImageReader` caches decoded images per reader, bounded by both `cache_size`
+(default 4) and `max_cache_bytes` (default 256 MiB). Images exceeding the byte
+budget are decoded on each read without being cached. JPEG and PNG generally
+require whole-image decoding; the cache budget does not bound the memory needed
+to decode one image. With multiple reader workers, each has its own cache.
 
 On Windows, the viewer can run as a background service managed by WinSW. See
 [Windows service setup](docs/WINDOWS_SERVICE.md) for installation and service
@@ -116,7 +279,7 @@ mkdir -p data/slides data/overlays
 docker compose up --build -d
 ```
 
-Open <http://127.0.0.1:8000>. Compose mounts slides and overlays read-only and
+Open [http://127.0.0.1:8000](http://127.0.0.1:8000). Compose mounts slides and overlays read-only and
 stores crops and browser uploads in persistent volumes. Stop the
 service with `docker compose down`; add `--volumes` only when you also want to
 delete saved crops and uploaded slides.
@@ -184,6 +347,16 @@ physical coordinates. Each overlay uses a caller-owned palette, and an optional
 binary coverage TIFF distinguishes a valid class (including class zero) from a
 region that was never predicted. See the complete
 [Segment prediction-mask contract](docs/SEGMENT_PREDICTION_MASK_CONTRACT.md).
+
+The upstream contract for nucleus-center and box detections is in
+[Detection prediction contract](docs/DETECTION_PREDICTION_CONTRACT.md).
+Detection manifests use the same `--overlay` and `--overlay-root` options.
+The viewer imports JSONL records into a temporary disk-backed SQLite R-tree and
+queries the visible region for Canvas point rendering. Points appear only at
+native level 0–1 resolutions or higher zoom; lower zoom clears the layer and
+stops point queries. Box-only records use their box center. Layer controls
+adjust class colors, visibility, opacity, screen-space radius (1–24 px), and
+filled or hollow circles. Boxes and instance contours are not drawn.
 
 Register a manifest from the CLI:
 
@@ -401,6 +574,31 @@ try:
 finally:
     reader.close()
 ```
+
+For parallel reading, supply a factory that creates an independent reader for
+each thread:
+
+```python
+from contextlib import closing
+
+stream = PatchStream(
+    None, requests, reader_factory=TiffReader, num_workers=4, max_pending=8
+)
+with closing(iter(stream)) as patches:
+    for patch in patches:
+        prediction = model(patch.image)
+```
+
+`num_workers=1` keeps the default synchronous behavior. Parallel mode preserves
+request order and queues at most `max_pending` requests (default: twice the
+thread count), including completed patches waiting to be consumed. It requires
+`reader_factory` rather than a shared reader, since backend handles and caches
+are not safe to share between threads. The iterator closes all readers it
+creates on exhaustion, failure, or explicit iterator closure, after waiting for
+running reads to finish. Each thread has its own metadata and handle caches,
+so memory and open-file usage grow with the thread count. With PyTorch
+DataLoader, process concurrency remains controlled by `num_workers` on the
+DataLoader; this option applies to direct `PatchStream` use.
 
 The grid sampler aligns its final window with the far edge, so an inference
 canvas is fully covered. Use `edge="drop"` if incomplete boundary regions should

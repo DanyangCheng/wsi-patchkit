@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import faulthandler
+import json
 import logging
 import math
 import re
@@ -13,7 +14,10 @@ import time
 from collections.abc import Iterable, Mapping
 from pathlib import Path
 
-SLIDE_EXTENSIONS = frozenset(
+from ..io.image import IMAGE_EXTENSIONS
+from ..types import MPP, as_mpp
+
+SLIDE_EXTENSIONS = IMAGE_EXTENSIONS | frozenset(
     {
         ".bif",
         ".kfb",
@@ -35,6 +39,16 @@ def _slide(value: str) -> tuple[str, Path]:
     if not separator or not slide_id or not path:
         raise argparse.ArgumentTypeError("slides must use ID=/path/to/slide.svs")
     return slide_id, Path(path)
+
+
+def _source_mpp(value: str) -> MPP:
+    try:
+        parts = tuple(float(item) for item in value.split(","))
+        return as_mpp(parts[0] if len(parts) == 1 else parts, name="source_mpp")
+    except ValueError as error:
+        raise argparse.ArgumentTypeError(
+            "source MPP must be a positive number or X,Y pair in micrometers/pixel"
+        ) from error
 
 
 def _unique_slide_id(relative_path: Path, existing: set[str]) -> str:
@@ -176,6 +190,7 @@ def discover_overlays(
     predictions for more slides than the current viewer exposes.
     """
     from .overlays import load_indexed_overlay_manifest
+    from .registry import valid_public_id
 
     registered = set(slide_ids)
     aliases = dict(slide_id_aliases or {})
@@ -189,22 +204,32 @@ def discover_overlays(
             key=lambda path: path.relative_to(directory).as_posix().casefold(),
         )
         for manifest in manifests:
-            overlay = load_indexed_overlay_manifest(manifest)
+            payload = json.loads(manifest.read_text(encoding="utf-8"))
+            if (
+                isinstance(payload, dict)
+                and payload.get("schema") == "wsi-patchkit-detection/v1"
+            ):
+                # Import records once, when OverlayRegistry registers this path.
+                manifest_id = valid_public_id(payload.get("slide_id"), name="slide ID")
+                overlay_id = valid_public_id(
+                    payload.get("overlay_id"), name="overlay ID"
+                )
+            else:
+                overlay = load_indexed_overlay_manifest(manifest)
+                manifest_id, overlay_id = overlay.slide_id, overlay.overlay_id
             slide_id = (
-                overlay.slide_id
-                if overlay.slide_id in registered
-                else aliases.get(overlay.slide_id)
+                manifest_id if manifest_id in registered else aliases.get(manifest_id)
             )
             if slide_id not in registered:
                 continue
             slide_overlays = overlays.setdefault(slide_id, {})
-            if overlay.overlay_id in slide_overlays:
-                previous = slide_overlays[overlay.overlay_id]
+            if overlay_id in slide_overlays:
+                previous = slide_overlays[overlay_id]
                 raise ValueError(
-                    f"duplicate overlay {overlay.overlay_id!r} for slide "
+                    f"duplicate overlay {overlay_id!r} for slide "
                     f"{slide_id!r}: {previous} and {manifest}"
                 )
-            slide_overlays[overlay.overlay_id] = manifest
+            slide_overlays[overlay_id] = manifest
     return overlays
 
 
@@ -234,6 +259,12 @@ def main() -> None:
     )
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", default=8000, type=int)
+    parser.add_argument(
+        "--source-mpp",
+        type=_source_mpp,
+        metavar="MPP|X,Y",
+        help="override source resolution in micrometers/pixel for served images",
+    )
     parser.add_argument("--tile-size", default=512, type=int)
     parser.add_argument("--reader-pool-size", default=4, type=int)
     parser.add_argument(
@@ -278,7 +309,7 @@ def main() -> None:
         default=[],
         type=Path,
         metavar="MANIFEST.json",
-        help="register a wsi-patchkit-overlay/v1 manifest; repeatable",
+        help="register an indexed or detection prediction manifest; repeatable",
     )
     parser.add_argument(
         "--overlay-root",
@@ -337,7 +368,7 @@ def main() -> None:
         raise SystemExit("Install the viewer with: uv sync --extra web") from error
 
     from .app import create_app
-    from .overlays import load_indexed_overlay_manifest
+    from .overlays import load_overlay_manifest
 
     if args.debug_render:
         render_logger = logging.getLogger("wsi_patchkit")
@@ -362,7 +393,7 @@ def main() -> None:
     overlays: dict[str, dict[str, object]] = {}
     try:
         for manifest in args.overlay:
-            overlay = load_indexed_overlay_manifest(manifest)
+            overlay = load_overlay_manifest(manifest)
             slide_overlays = overlays.setdefault(overlay.slide_id, {})
             if overlay.overlay_id in slide_overlays:
                 parser.error(
@@ -399,6 +430,7 @@ def main() -> None:
 
     app = create_app(
         slides,
+        source_mpp=args.source_mpp,
         overlays=overlays,
         manifest_slide_id_aliases=manifest_slide_id_aliases,
         tile_size=args.tile_size,
