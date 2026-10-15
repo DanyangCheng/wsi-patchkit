@@ -26,6 +26,7 @@ services:
         source: ${WSI_SLIDES_DIR:-./data/uploads}
         target: /data/uploads
         read_only: false
+      - index-cache:/data/cache
     command:
       - --host
       - 0.0.0.0
@@ -41,6 +42,10 @@ services:
       - /data/uploads
       - --reader-pool-size
       - "${PATCHKIT_READER_POOL_SIZE:-4}"
+      - --reader-cache-size
+      - "${PATCHKIT_READER_CACHE_SIZE:-1}"
+      - --kfb-index-cache-dir
+      - /data/cache/kfb-index
       - --crop-workers
       - "${PATCHKIT_CROP_WORKERS:-1}"
     read_only: true
@@ -52,3 +57,4 @@ services:
 volumes:
   crops:
   uploads:
+  index-cache:

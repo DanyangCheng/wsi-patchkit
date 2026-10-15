@@ -4,10 +4,15 @@ from __future__ import annotations
 
 import logging
 import math
+import os
+import sqlite3
 import struct
 import time
+from importlib import import_module
+from pathlib import Path
 from typing import Any
 
+from ._kfb_index import SQLiteTileIndex
 from .openslide import OpenSlideReader
 
 _LOGGER = logging.getLogger(__name__)
@@ -59,10 +64,123 @@ class KfbSlideReader(OpenSlideReader):
     _backend_module = "kfbslide"
     _missing_backend_message = "KfbSlideReader requires the 'kfbslide' package"
 
+    def __init__(
+        self,
+        cache_size: int = 4,
+        *,
+        index_cache_dir: str | Path | None = None,
+        tile_cache_size: int = 256,
+    ) -> None:
+        if tile_cache_size < 0:
+            raise ValueError("KFB tile cache size must be non-negative")
+        super().__init__(cache_size=cache_size)
+        self.index_cache_dir = index_cache_dir
+        self.tile_cache_size = tile_cache_size
+
     def _open_slide(self, path: str) -> Any:
         backend = self._openslide
+        cache_dir = self.index_cache_dir
+        if cache_dir is not None and getattr(backend, "__version__", None) not in (
+            "0.3.2",
+            "0.3.3",
+        ):
+            raise RuntimeError("persistent KFB indices require kfbslide 0.3.2 or 0.3.3")
+        private = import_module("kfbslide._slide")
+        tile_cache_size = self.tile_cache_size
 
         class CompatibleSlide(backend.OpenSlide):
+            def __init__(self, filename):
+                if cache_dir is None:
+                    super().__init__(filename)
+                    self._tile_cache.capacity = tile_cache_size
+                    return
+                # Initialize the pinned backend without calling _TileIndex,
+                # which would materialize every record before our replacement.
+                self._filename = filename
+                self._closed = False
+                self._file_handle = None
+                self._pid = os.getpid()
+                self._tile_cache = private._LRUCache(tile_cache_size)
+                try:
+                    self._info = private.parse_kfb_file(filename)
+                    self._index = SQLiteTileIndex(filename, self._info, cache_dir)
+                    self._file_handle = open(filename, "rb")  # noqa: SIM115
+                    header = self._info.header
+                    props = {
+                        "openslide.vendor": "kfbio",
+                        "openslide.quickhash-1": "",
+                        "openslide.mpp-x": str(header.mpp),
+                        "openslide.mpp-y": str(header.mpp),
+                        "openslide.objective-power": str(header.scan_scale),
+                        "kfbio.vendor": "Kfbio",
+                    }
+                    for name in (
+                        "version",
+                        "scan_scale",
+                        "tile_size",
+                        "tile_count",
+                        "width",
+                        "height",
+                        "spend_time",
+                        "scan_time",
+                        "mpp",
+                    ):
+                        props[f"kfbio.{name}"] = str(getattr(header, name))
+                    self._properties = private._KfbPropertyMap(props)
+                    self._associated_images = private._AssociatedImageMap(
+                        filename,
+                        self._info.assoc_images,
+                        file_handle_getter=lambda: (
+                            self._ensure_open_handle() if not self._closed else None
+                        ),
+                    )
+                except BaseException as error:
+                    self.close()
+                    if isinstance(error, sqlite3.Error):
+                        raise OSError(
+                            "unable to access persistent KFB index"
+                        ) from error
+                    raise
+
+            def read_region(self, location, level, size):
+                index = self._index
+                if isinstance(index, SQLiteTileIndex):
+                    if not 0 <= level < index.level_count:
+                        raise backend.OpenSlideError(f"Invalid level {level}")
+                    scale = index.level_scales[level]
+                    ds = self._info.header.scan_scale / scale
+                    x, y = int(location[0] / ds), int(location[1] / ds)
+                    tile = index.tile_size
+                    index.prefetch(
+                        scale,
+                        (
+                            (x // tile) * tile,
+                            (y // tile) * tile,
+                            ((x + size[0] - 1) // tile + 1) * tile,
+                            ((y + size[1] - 1) // tile + 1) * tile,
+                        ),
+                    )
+                return super().read_region(location, level, size)
+
+            def _try_heal_tile(self, idx, exc):
+                index = self._index
+                if not isinstance(index, SQLiteTileIndex):
+                    return super()._try_heal_tile(idx, exc)
+                with index.repair_window(idx) as window:
+                    self._index = window
+                    try:
+                        return super()._try_heal_tile(idx, exc)
+                    finally:
+                        self._index = index
+
+            def close(self):
+                index = getattr(self, "_index", None)
+                try:
+                    super().close()
+                finally:
+                    if isinstance(index, SQLiteTileIndex):
+                        index.close()
+
             # Intercept parsed file info before the backend constructs its
             # index. Keep the backend constructor/decoder and avoid changing
             # module globals shared by concurrent readers.
@@ -185,3 +303,19 @@ class KfbSlideReader(OpenSlideReader):
 
     def __enter__(self) -> KfbSlideReader:
         return self
+
+    def read_region(self, path, location, level, size):
+        try:
+            return super().read_region(path, location, level, size)
+        except sqlite3.Error as error:
+            raise OSError("unable to read persistent KFB index") from error
+
+    def __getstate__(self) -> dict[str, Any]:
+        return {
+            "cache_size": self.cache_size,
+            "index_cache_dir": self.index_cache_dir,
+            "tile_cache_size": self.tile_cache_size,
+        }
+
+    def __setstate__(self, state: dict[str, Any]) -> None:
+        self.__init__(**state)

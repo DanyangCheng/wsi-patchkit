@@ -1104,6 +1104,11 @@
       navigatorPosition: "TOP_RIGHT",
       navigatorSizeRatio: 0.16,
       showNavigationControl: false,
+      // Keep the decode queue short. AJAX tile jobs can be aborted when the
+      // image is closed; the server then discards disconnected queued work.
+      imageLoaderLimit: 4,
+      loadTilesWithAjax: true,
+      maxImageCacheCount: 128,
       preserveViewport: false,
       animationTime: 0.45,
       springStiffness: 8,
@@ -1124,6 +1129,12 @@
         flickEnabled: true,
         dblClickToZoom: true,
       },
+    });
+
+    viewer.addHandler("viewport-change", () => {
+      // Rebuild the pending queue for the current view instead of fetching
+      // tiles queued along an earlier pan/zoom path. Active jobs stay bounded.
+      viewer.imageLoader.clear();
     });
 
     viewer.addHandler("open", () => {
