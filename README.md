@@ -41,6 +41,20 @@ PyTorch integration is isolated in another extra:
 uv sync --extra torch
 ```
 
+## KFB to TIFF conversion
+
+Convert a KFB file to tiled BigTIFF with its native pyramid and MPP metadata:
+
+```bash
+uv run --extra tiff-codecs kfb-to-tiff /data/slides/sample.kfb /data/tiff/sample.tiff --workers 4
+```
+
+Compatible JPEG tiles are copied without decoding or re-encoding. Other tiles
+are converted using independent worker readers with a bounded tile queue.
+Use `--compression deflate` for lossless decoded RGB pixels, or provide input
+and output directories with `--recursive --jobs 2` for parallel batch conversion.
+See [KFB conversion usage and performance options](docs/KFB_TO_TIFF.md).
+
 ## Browser WSI viewer
 
 Install the optional web dependencies:

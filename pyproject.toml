@@ -35,10 +35,12 @@ dependencies = [
 [project.optional-dependencies]
 torch = ["torch>=2.1"]
 web = ["fastapi>=0.115", "uvicorn[standard]>=0.30"]
+tiff-codecs = ["imagecodecs>=2024.1.1"]
 
 [project.scripts]
 patchkit-web = "wsi_patchkit.web.__main__:main"
 wsi-patchkit-viewer = "wsi_patchkit.web.__main__:main"
+kfb-to-tiff = "wsi_patchkit.kfb_to_tiff:main"
 
 [dependency-groups]
 dev = [

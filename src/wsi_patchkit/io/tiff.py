@@ -52,7 +52,7 @@ def _page_pixel_format(page: tifffile.TiffPage) -> PixelFormat:
         else "rgba"
         if photometric_value == 2 and channels == 4
         else "rgb"
-        if photometric_value == 2
+        if photometric_value in (2, 6)
         else "unknown"
     )
     return PixelFormat(
@@ -63,17 +63,59 @@ def _page_pixel_format(page: tifffile.TiffPage) -> PixelFormat:
     )
 
 
+def _pyramid_pages(tif: tifffile.TiffFile) -> list[tifffile.TiffPage]:
+    """Include reduced SubIFDs even for non-integral KFB pyramid ratios.
+
+    tifffile's generic series grouping recognizes integer pyramid factors.
+    A KFB can use e.g. 40x/15x; its reduced SubIFDs still form a valid pyramid.
+    Only extend single-page image series, retaining the existing behavior for
+    multi-page data and rejecting label/macro SubIFDs of unrelated geometry.
+    """
+    series = tif.series[0]
+    pages = [level.pages[0] for level in series.levels]
+    base = pages[0]
+    if base.subifds and len(series.pages) == 1:
+        reduced = sorted(
+            (
+                page
+                for page in base.pages
+                if page.is_reduced
+                and page.dtype == base.dtype
+                and page.samplesperpixel == base.samplesperpixel
+                and 0 < page.imagewidth <= base.imagewidth
+                and 0 < page.imagelength <= base.imagelength
+                and page.imagewidth * page.imagelength
+                < base.imagewidth * base.imagelength
+            ),
+            key=lambda page: page.imagewidth * page.imagelength,
+            reverse=True,
+        )
+        result = [base]
+        for page in reduced:
+            previous = result[-1]
+            if (
+                page.imagewidth <= previous.imagewidth
+                and page.imagelength <= previous.imagelength
+                and page.imagewidth * page.imagelength
+                < previous.imagewidth * previous.imagelength
+            ):
+                result.append(page)
+        if len(result) > len(pages):
+            return result
+    return pages
+
+
 class _TiffLevelReader:
     def __init__(self, path: str, level: int) -> None:
         self._tif: tifffile.TiffFile | None = tifffile.TiffFile(path)
-        levels = self._tif.series[0].levels
+        levels = _pyramid_pages(self._tif)
         if not 0 <= level < len(levels):
             self.close()
             raise ValueError(
                 f"pyramid level {level} is unavailable; "
                 f"slide has {len(levels)} level(s)"
             )
-        self.page = levels[level].pages[0]
+        self.page = levels[level]
         if len(self.page.shape) not in (2, 3):
             self.close()
             raise ValueError(f"unsupported TIFF page shape {self.page.shape}")
@@ -192,8 +234,7 @@ class TiffReader:
             self._metadata.move_to_end(key)
             return cached
         with tifffile.TiffFile(resolved) as tif:
-            series = tif.series[0]
-            pages = [level.pages[0] for level in series.levels]
+            pages = _pyramid_pages(tif)
             dimensions = [
                 (int(page.imagewidth), int(page.imagelength)) for page in pages
             ]
