@@ -1,0 +1,1832 @@
+[
+  {
+    "backend": "tiff",
+    "path": "/home/cdy/Projects/wsi-patchkit/slides/133S.tif",
+    "bytes": 642004494,
+    "sha256": "ef0dcedab23a0af14f64471cb5f8b865870254629227bcf003f6145679a25333",
+    "checks": [
+      {
+        "level": 0,
+        "native_origin": [
+          1,
+          1
+        ],
+        "native_crop_equal": true,
+        "physical_equal": true,
+        "valid_centers": 64,
+        "varied_pixels": true
+      },
+      {
+        "level": 0,
+        "native_origin": [
+          7,
+          11
+        ],
+        "native_crop_equal": true,
+        "physical_equal": true,
+        "valid_centers": 64,
+        "varied_pixels": true
+      },
+      {
+        "level": 0,
+        "native_origin": [
+          29,
+          17
+        ],
+        "native_crop_equal": true,
+        "physical_equal": true,
+        "valid_centers": 64,
+        "varied_pixels": true
+      },
+      {
+        "level": 0,
+        "native_origin": [
+          19841,
+          16001
+        ],
+        "native_crop_equal": true,
+        "physical_equal": true,
+        "valid_centers": 64,
+        "varied_pixels": true
+      },
+      {
+        "level": 0,
+        "native_origin": [
+          19847,
+          16011
+        ],
+        "native_crop_equal": true,
+        "physical_equal": true,
+        "valid_centers": 64,
+        "varied_pixels": true
+      },
+      {
+        "level": 0,
+        "native_origin": [
+          19869,
+          16017
+        ],
+        "native_crop_equal": true,
+        "physical_equal": true,
+        "valid_centers": 64,
+        "varied_pixels": true
+      },
+      {
+        "level": 1,
+        "native_origin": [
+          1,
+          1
+        ],
+        "native_crop_equal": true,
+        "physical_equal": true,
+        "valid_centers": 64,
+        "varied_pixels": true
+      },
+      {
+        "level": 1,
+        "native_origin": [
+          7,
+          11
+        ],
+        "native_crop_equal": true,
+        "physical_equal": true,
+        "valid_centers": 64,
+        "varied_pixels": true
+      },
+      {
+        "level": 1,
+        "native_origin": [
+          29,
+          17
+        ],
+        "native_crop_equal": true,
+        "physical_equal": true,
+        "valid_centers": 64,
+        "varied_pixels": true
+      },
+      {
+        "level": 1,
+        "native_origin": [
+          9921,
+          8001
+        ],
+        "native_crop_equal": true,
+        "physical_equal": true,
+        "valid_centers": 64,
+        "varied_pixels": true
+      },
+      {
+        "level": 1,
+        "native_origin": [
+          9927,
+          8011
+        ],
+        "native_crop_equal": true,
+        "physical_equal": true,
+        "valid_centers": 64,
+        "varied_pixels": true
+      },
+      {
+        "level": 1,
+        "native_origin": [
+          9949,
+          8017
+        ],
+        "native_crop_equal": true,
+        "physical_equal": true,
+        "valid_centers": 64,
+        "varied_pixels": true
+      },
+      {
+        "level": 2,
+        "native_origin": [
+          1,
+          1
+        ],
+        "native_crop_equal": true,
+        "physical_equal": true,
+        "valid_centers": 64,
+        "varied_pixels": true
+      },
+      {
+        "level": 2,
+        "native_origin": [
+          7,
+          11
+        ],
+        "native_crop_equal": true,
+        "physical_equal": true,
+        "valid_centers": 64,
+        "varied_pixels": true
+      },
+      {
+        "level": 2,
+        "native_origin": [
+          29,
+          17
+        ],
+        "native_crop_equal": true,
+        "physical_equal": true,
+        "valid_centers": 64,
+        "varied_pixels": true
+      },
+      {
+        "level": 2,
+        "native_origin": [
+          4961,
+          4001
+        ],
+        "native_crop_equal": true,
+        "physical_equal": true,
+        "valid_centers": 64,
+        "varied_pixels": true
+      },
+      {
+        "level": 2,
+        "native_origin": [
+          4967,
+          4011
+        ],
+        "native_crop_equal": true,
+        "physical_equal": true,
+        "valid_centers": 64,
+        "varied_pixels": true
+      },
+      {
+        "level": 2,
+        "native_origin": [
+          4989,
+          4017
+        ],
+        "native_crop_equal": true,
+        "physical_equal": true,
+        "valid_centers": 64,
+        "varied_pixels": true
+      },
+      {
+        "level": 3,
+        "native_origin": [
+          1,
+          1
+        ],
+        "native_crop_equal": true,
+        "physical_equal": true,
+        "valid_centers": 64,
+        "varied_pixels": true
+      },
+      {
+        "level": 3,
+        "native_origin": [
+          7,
+          11
+        ],
+        "native_crop_equal": true,
+        "physical_equal": true,
+        "valid_centers": 64,
+        "varied_pixels": true
+      },
+      {
+        "level": 3,
+        "native_origin": [
+          29,
+          17
+        ],
+        "native_crop_equal": true,
+        "physical_equal": true,
+        "valid_centers": 64,
+        "varied_pixels": true
+      },
+      {
+        "level": 3,
+        "native_origin": [
+          2481,
+          2001
+        ],
+        "native_crop_equal": true,
+        "physical_equal": true,
+        "valid_centers": 64,
+        "varied_pixels": true
+      },
+      {
+        "level": 3,
+        "native_origin": [
+          2487,
+          2011
+        ],
+        "native_crop_equal": true,
+        "physical_equal": true,
+        "valid_centers": 64,
+        "varied_pixels": true
+      },
+      {
+        "level": 3,
+        "native_origin": [
+          2509,
+          2017
+        ],
+        "native_crop_equal": true,
+        "physical_equal": true,
+        "valid_centers": 64,
+        "varied_pixels": true
+      },
+      {
+        "level": 4,
+        "native_origin": [
+          1,
+          1
+        ],
+        "native_crop_equal": true,
+        "physical_equal": true,
+        "valid_centers": 64,
+        "varied_pixels": true
+      },
+      {
+        "level": 4,
+        "native_origin": [
+          7,
+          11
+        ],
+        "native_crop_equal": true,
+        "physical_equal": true,
+        "valid_centers": 64,
+        "varied_pixels": true
+      },
+      {
+        "level": 4,
+        "native_origin": [
+          29,
+          17
+        ],
+        "native_crop_equal": true,
+        "physical_equal": true,
+        "valid_centers": 64,
+        "varied_pixels": true
+      },
+      {
+        "level": 4,
+        "native_origin": [
+          1241,
+          1001
+        ],
+        "native_crop_equal": true,
+        "physical_equal": true,
+        "valid_centers": 64,
+        "varied_pixels": true
+      },
+      {
+        "level": 4,
+        "native_origin": [
+          1247,
+          1011
+        ],
+        "native_crop_equal": true,
+        "physical_equal": true,
+        "valid_centers": 64,
+        "varied_pixels": true
+      },
+      {
+        "level": 4,
+        "native_origin": [
+          1269,
+          1017
+        ],
+        "native_crop_equal": true,
+        "physical_equal": true,
+        "valid_centers": 64,
+        "varied_pixels": true
+      },
+      {
+        "level": 5,
+        "native_origin": [
+          1,
+          1
+        ],
+        "native_crop_equal": true,
+        "physical_equal": true,
+        "valid_centers": 64,
+        "varied_pixels": true
+      },
+      {
+        "level": 5,
+        "native_origin": [
+          7,
+          11
+        ],
+        "native_crop_equal": true,
+        "physical_equal": true,
+        "valid_centers": 64,
+        "varied_pixels": true
+      },
+      {
+        "level": 5,
+        "native_origin": [
+          29,
+          17
+        ],
+        "native_crop_equal": true,
+        "physical_equal": true,
+        "valid_centers": 64,
+        "varied_pixels": true
+      },
+      {
+        "level": 5,
+        "native_origin": [
+          621,
+          501
+        ],
+        "native_crop_equal": true,
+        "physical_equal": true,
+        "valid_centers": 64,
+        "varied_pixels": true
+      },
+      {
+        "level": 5,
+        "native_origin": [
+          627,
+          511
+        ],
+        "native_crop_equal": true,
+        "physical_equal": true,
+        "valid_centers": 64,
+        "varied_pixels": true
+      },
+      {
+        "level": 5,
+        "native_origin": [
+          649,
+          517
+        ],
+        "native_crop_equal": true,
+        "physical_equal": true,
+        "valid_centers": 64,
+        "varied_pixels": true
+      },
+      {
+        "level": 6,
+        "native_origin": [
+          1,
+          1
+        ],
+        "native_crop_equal": true,
+        "physical_equal": true,
+        "valid_centers": 64,
+        "varied_pixels": true
+      },
+      {
+        "level": 6,
+        "native_origin": [
+          7,
+          11
+        ],
+        "native_crop_equal": true,
+        "physical_equal": true,
+        "valid_centers": 64,
+        "varied_pixels": true
+      },
+      {
+        "level": 6,
+        "native_origin": [
+          29,
+          17
+        ],
+        "native_crop_equal": true,
+        "physical_equal": true,
+        "valid_centers": 64,
+        "varied_pixels": true
+      },
+      {
+        "level": 6,
+        "native_origin": [
+          311,
+          251
+        ],
+        "native_crop_equal": true,
+        "physical_equal": true,
+        "valid_centers": 64,
+        "varied_pixels": true
+      },
+      {
+        "level": 6,
+        "native_origin": [
+          317,
+          261
+        ],
+        "native_crop_equal": true,
+        "physical_equal": true,
+        "valid_centers": 64,
+        "varied_pixels": true
+      },
+      {
+        "level": 6,
+        "native_origin": [
+          339,
+          267
+        ],
+        "native_crop_equal": true,
+        "physical_equal": true,
+        "valid_centers": 64,
+        "varied_pixels": true
+      },
+      {
+        "level": 7,
+        "native_origin": [
+          1,
+          1
+        ],
+        "native_crop_equal": true,
+        "physical_equal": true,
+        "valid_centers": 64,
+        "varied_pixels": true
+      },
+      {
+        "level": 7,
+        "native_origin": [
+          7,
+          11
+        ],
+        "native_crop_equal": true,
+        "physical_equal": true,
+        "valid_centers": 64,
+        "varied_pixels": true
+      },
+      {
+        "level": 7,
+        "native_origin": [
+          29,
+          17
+        ],
+        "native_crop_equal": true,
+        "physical_equal": true,
+        "valid_centers": 64,
+        "varied_pixels": true
+      },
+      {
+        "level": 7,
+        "native_origin": [
+          156,
+          126
+        ],
+        "native_crop_equal": true,
+        "physical_equal": true,
+        "valid_centers": 64,
+        "varied_pixels": true
+      },
+      {
+        "level": 7,
+        "native_origin": [
+          162,
+          136
+        ],
+        "native_crop_equal": true,
+        "physical_equal": true,
+        "valid_centers": 64,
+        "varied_pixels": true
+      },
+      {
+        "level": 7,
+        "native_origin": [
+          184,
+          142
+        ],
+        "native_crop_equal": true,
+        "physical_equal": true,
+        "valid_centers": 64,
+        "varied_pixels": true
+      }
+    ],
+    "levels": [
+      {
+        "level": 0,
+        "dimensions": [
+          59520,
+          48000
+        ],
+        "downsample": [
+          1.0,
+          1.0
+        ],
+        "mpp": [
+          0.45669399219053275,
+          0.45669399219053275
+        ]
+      },
+      {
+        "level": 1,
+        "dimensions": [
+          29760,
+          24000
+        ],
+        "downsample": [
+          2.0,
+          2.0
+        ],
+        "mpp": [
+          0.9133879843810655,
+          0.9133879843810655
+        ]
+      },
+      {
+        "level": 2,
+        "dimensions": [
+          14880,
+          12000
+        ],
+        "downsample": [
+          4.0,
+          4.0
+        ],
+        "mpp": [
+          1.826775968762131,
+          1.826775968762131
+        ]
+      },
+      {
+        "level": 3,
+        "dimensions": [
+          7440,
+          6000
+        ],
+        "downsample": [
+          8.0,
+          8.0
+        ],
+        "mpp": [
+          3.653551937524262,
+          3.653551937524262
+        ]
+      },
+      {
+        "level": 4,
+        "dimensions": [
+          3720,
+          3000
+        ],
+        "downsample": [
+          16.0,
+          16.0
+        ],
+        "mpp": [
+          7.307103875048524,
+          7.307103875048524
+        ]
+      },
+      {
+        "level": 5,
+        "dimensions": [
+          1860,
+          1500
+        ],
+        "downsample": [
+          32.0,
+          32.0
+        ],
+        "mpp": [
+          14.614207750097048,
+          14.614207750097048
+        ]
+      },
+      {
+        "level": 6,
+        "dimensions": [
+          930,
+          750
+        ],
+        "downsample": [
+          64.0,
+          64.0
+        ],
+        "mpp": [
+          29.228415500194096,
+          29.228415500194096
+        ]
+      },
+      {
+        "level": 7,
+        "dimensions": [
+          465,
+          375
+        ],
+        "downsample": [
+          128.0,
+          128.0
+        ],
+        "mpp": [
+          58.45683100038819,
+          58.45683100038819
+        ]
+      }
+    ],
+    "mpp": [
+      0.45669399219053275,
+      0.45669399219053275
+    ],
+    "vendor": "generic-tiff",
+    "passed": true
+  },
+  {
+    "backend": "openslide",
+    "path": "/home/cdy/Projects/wsi-patchkit/slides/133S.tif",
+    "bytes": 642004494,
+    "sha256": "ef0dcedab23a0af14f64471cb5f8b865870254629227bcf003f6145679a25333",
+    "checks": [
+      {
+        "level": 0,
+        "native_origin": [
+          1,
+          1
+        ],
+        "native_crop_equal": true,
+        "physical_equal": true,
+        "valid_centers": 64,
+        "varied_pixels": true
+      },
+      {
+        "level": 0,
+        "native_origin": [
+          7,
+          11
+        ],
+        "native_crop_equal": true,
+        "physical_equal": true,
+        "valid_centers": 64,
+        "varied_pixels": true
+      },
+      {
+        "level": 0,
+        "native_origin": [
+          29,
+          17
+        ],
+        "native_crop_equal": true,
+        "physical_equal": true,
+        "valid_centers": 64,
+        "varied_pixels": true
+      },
+      {
+        "level": 0,
+        "native_origin": [
+          19841,
+          16001
+        ],
+        "native_crop_equal": true,
+        "physical_equal": true,
+        "valid_centers": 64,
+        "varied_pixels": true
+      },
+      {
+        "level": 0,
+        "native_origin": [
+          19847,
+          16011
+        ],
+        "native_crop_equal": true,
+        "physical_equal": true,
+        "valid_centers": 64,
+        "varied_pixels": true
+      },
+      {
+        "level": 0,
+        "native_origin": [
+          19869,
+          16017
+        ],
+        "native_crop_equal": true,
+        "physical_equal": true,
+        "valid_centers": 64,
+        "varied_pixels": true
+      },
+      {
+        "level": 1,
+        "native_origin": [
+          1,
+          1
+        ],
+        "native_crop_equal": true,
+        "physical_equal": true,
+        "valid_centers": 64,
+        "varied_pixels": true
+      },
+      {
+        "level": 1,
+        "native_origin": [
+          7,
+          11
+        ],
+        "native_crop_equal": true,
+        "physical_equal": true,
+        "valid_centers": 64,
+        "varied_pixels": true
+      },
+      {
+        "level": 1,
+        "native_origin": [
+          29,
+          17
+        ],
+        "native_crop_equal": true,
+        "physical_equal": true,
+        "valid_centers": 64,
+        "varied_pixels": true
+      },
+      {
+        "level": 1,
+        "native_origin": [
+          9921,
+          8001
+        ],
+        "native_crop_equal": true,
+        "physical_equal": true,
+        "valid_centers": 64,
+        "varied_pixels": true
+      },
+      {
+        "level": 1,
+        "native_origin": [
+          9927,
+          8011
+        ],
+        "native_crop_equal": true,
+        "physical_equal": true,
+        "valid_centers": 64,
+        "varied_pixels": true
+      },
+      {
+        "level": 1,
+        "native_origin": [
+          9949,
+          8017
+        ],
+        "native_crop_equal": true,
+        "physical_equal": true,
+        "valid_centers": 64,
+        "varied_pixels": true
+      },
+      {
+        "level": 2,
+        "native_origin": [
+          1,
+          1
+        ],
+        "native_crop_equal": true,
+        "physical_equal": true,
+        "valid_centers": 64,
+        "varied_pixels": true
+      },
+      {
+        "level": 2,
+        "native_origin": [
+          7,
+          11
+        ],
+        "native_crop_equal": true,
+        "physical_equal": true,
+        "valid_centers": 64,
+        "varied_pixels": true
+      },
+      {
+        "level": 2,
+        "native_origin": [
+          29,
+          17
+        ],
+        "native_crop_equal": true,
+        "physical_equal": true,
+        "valid_centers": 64,
+        "varied_pixels": true
+      },
+      {
+        "level": 2,
+        "native_origin": [
+          4961,
+          4001
+        ],
+        "native_crop_equal": true,
+        "physical_equal": true,
+        "valid_centers": 64,
+        "varied_pixels": true
+      },
+      {
+        "level": 2,
+        "native_origin": [
+          4967,
+          4011
+        ],
+        "native_crop_equal": true,
+        "physical_equal": true,
+        "valid_centers": 64,
+        "varied_pixels": true
+      },
+      {
+        "level": 2,
+        "native_origin": [
+          4989,
+          4017
+        ],
+        "native_crop_equal": true,
+        "physical_equal": true,
+        "valid_centers": 64,
+        "varied_pixels": true
+      },
+      {
+        "level": 3,
+        "native_origin": [
+          1,
+          1
+        ],
+        "native_crop_equal": true,
+        "physical_equal": true,
+        "valid_centers": 64,
+        "varied_pixels": true
+      },
+      {
+        "level": 3,
+        "native_origin": [
+          7,
+          11
+        ],
+        "native_crop_equal": true,
+        "physical_equal": true,
+        "valid_centers": 64,
+        "varied_pixels": true
+      },
+      {
+        "level": 3,
+        "native_origin": [
+          29,
+          17
+        ],
+        "native_crop_equal": true,
+        "physical_equal": true,
+        "valid_centers": 64,
+        "varied_pixels": true
+      },
+      {
+        "level": 3,
+        "native_origin": [
+          2481,
+          2001
+        ],
+        "native_crop_equal": true,
+        "physical_equal": true,
+        "valid_centers": 64,
+        "varied_pixels": true
+      },
+      {
+        "level": 3,
+        "native_origin": [
+          2487,
+          2011
+        ],
+        "native_crop_equal": true,
+        "physical_equal": true,
+        "valid_centers": 64,
+        "varied_pixels": true
+      },
+      {
+        "level": 3,
+        "native_origin": [
+          2509,
+          2017
+        ],
+        "native_crop_equal": true,
+        "physical_equal": true,
+        "valid_centers": 64,
+        "varied_pixels": true
+      },
+      {
+        "level": 4,
+        "native_origin": [
+          1,
+          1
+        ],
+        "native_crop_equal": true,
+        "physical_equal": true,
+        "valid_centers": 64,
+        "varied_pixels": true
+      },
+      {
+        "level": 4,
+        "native_origin": [
+          7,
+          11
+        ],
+        "native_crop_equal": true,
+        "physical_equal": true,
+        "valid_centers": 64,
+        "varied_pixels": true
+      },
+      {
+        "level": 4,
+        "native_origin": [
+          29,
+          17
+        ],
+        "native_crop_equal": true,
+        "physical_equal": true,
+        "valid_centers": 64,
+        "varied_pixels": true
+      },
+      {
+        "level": 4,
+        "native_origin": [
+          1241,
+          1001
+        ],
+        "native_crop_equal": true,
+        "physical_equal": true,
+        "valid_centers": 64,
+        "varied_pixels": true
+      },
+      {
+        "level": 4,
+        "native_origin": [
+          1247,
+          1011
+        ],
+        "native_crop_equal": true,
+        "physical_equal": true,
+        "valid_centers": 64,
+        "varied_pixels": true
+      },
+      {
+        "level": 4,
+        "native_origin": [
+          1269,
+          1017
+        ],
+        "native_crop_equal": true,
+        "physical_equal": true,
+        "valid_centers": 64,
+        "varied_pixels": true
+      },
+      {
+        "level": 5,
+        "native_origin": [
+          1,
+          1
+        ],
+        "native_crop_equal": true,
+        "physical_equal": true,
+        "valid_centers": 64,
+        "varied_pixels": true
+      },
+      {
+        "level": 5,
+        "native_origin": [
+          7,
+          11
+        ],
+        "native_crop_equal": true,
+        "physical_equal": true,
+        "valid_centers": 64,
+        "varied_pixels": true
+      },
+      {
+        "level": 5,
+        "native_origin": [
+          29,
+          17
+        ],
+        "native_crop_equal": true,
+        "physical_equal": true,
+        "valid_centers": 64,
+        "varied_pixels": true
+      },
+      {
+        "level": 5,
+        "native_origin": [
+          621,
+          501
+        ],
+        "native_crop_equal": true,
+        "physical_equal": true,
+        "valid_centers": 64,
+        "varied_pixels": true
+      },
+      {
+        "level": 5,
+        "native_origin": [
+          627,
+          511
+        ],
+        "native_crop_equal": true,
+        "physical_equal": true,
+        "valid_centers": 64,
+        "varied_pixels": true
+      },
+      {
+        "level": 5,
+        "native_origin": [
+          649,
+          517
+        ],
+        "native_crop_equal": true,
+        "physical_equal": true,
+        "valid_centers": 64,
+        "varied_pixels": true
+      },
+      {
+        "level": 6,
+        "native_origin": [
+          1,
+          1
+        ],
+        "native_crop_equal": true,
+        "physical_equal": true,
+        "valid_centers": 64,
+        "varied_pixels": true
+      },
+      {
+        "level": 6,
+        "native_origin": [
+          7,
+          11
+        ],
+        "native_crop_equal": true,
+        "physical_equal": true,
+        "valid_centers": 64,
+        "varied_pixels": true
+      },
+      {
+        "level": 6,
+        "native_origin": [
+          29,
+          17
+        ],
+        "native_crop_equal": true,
+        "physical_equal": true,
+        "valid_centers": 64,
+        "varied_pixels": true
+      },
+      {
+        "level": 6,
+        "native_origin": [
+          311,
+          251
+        ],
+        "native_crop_equal": true,
+        "physical_equal": true,
+        "valid_centers": 64,
+        "varied_pixels": true
+      },
+      {
+        "level": 6,
+        "native_origin": [
+          317,
+          261
+        ],
+        "native_crop_equal": true,
+        "physical_equal": true,
+        "valid_centers": 64,
+        "varied_pixels": true
+      },
+      {
+        "level": 6,
+        "native_origin": [
+          339,
+          267
+        ],
+        "native_crop_equal": true,
+        "physical_equal": true,
+        "valid_centers": 64,
+        "varied_pixels": true
+      },
+      {
+        "level": 7,
+        "native_origin": [
+          1,
+          1
+        ],
+        "native_crop_equal": true,
+        "physical_equal": true,
+        "valid_centers": 64,
+        "varied_pixels": true
+      },
+      {
+        "level": 7,
+        "native_origin": [
+          7,
+          11
+        ],
+        "native_crop_equal": true,
+        "physical_equal": true,
+        "valid_centers": 64,
+        "varied_pixels": true
+      },
+      {
+        "level": 7,
+        "native_origin": [
+          29,
+          17
+        ],
+        "native_crop_equal": true,
+        "physical_equal": true,
+        "valid_centers": 64,
+        "varied_pixels": true
+      },
+      {
+        "level": 7,
+        "native_origin": [
+          156,
+          126
+        ],
+        "native_crop_equal": true,
+        "physical_equal": true,
+        "valid_centers": 64,
+        "varied_pixels": true
+      },
+      {
+        "level": 7,
+        "native_origin": [
+          162,
+          136
+        ],
+        "native_crop_equal": true,
+        "physical_equal": true,
+        "valid_centers": 64,
+        "varied_pixels": true
+      },
+      {
+        "level": 7,
+        "native_origin": [
+          184,
+          142
+        ],
+        "native_crop_equal": true,
+        "physical_equal": true,
+        "valid_centers": 64,
+        "varied_pixels": true
+      }
+    ],
+    "levels": [
+      {
+        "level": 0,
+        "dimensions": [
+          59520,
+          48000
+        ],
+        "downsample": [
+          1.0,
+          1.0
+        ],
+        "mpp": [
+          0.45669399219053275,
+          0.45669399219053275
+        ]
+      },
+      {
+        "level": 1,
+        "dimensions": [
+          29760,
+          24000
+        ],
+        "downsample": [
+          2.0,
+          2.0
+        ],
+        "mpp": [
+          0.9133879843810655,
+          0.9133879843810655
+        ]
+      },
+      {
+        "level": 2,
+        "dimensions": [
+          14880,
+          12000
+        ],
+        "downsample": [
+          4.0,
+          4.0
+        ],
+        "mpp": [
+          1.826775968762131,
+          1.826775968762131
+        ]
+      },
+      {
+        "level": 3,
+        "dimensions": [
+          7440,
+          6000
+        ],
+        "downsample": [
+          8.0,
+          8.0
+        ],
+        "mpp": [
+          3.653551937524262,
+          3.653551937524262
+        ]
+      },
+      {
+        "level": 4,
+        "dimensions": [
+          3720,
+          3000
+        ],
+        "downsample": [
+          16.0,
+          16.0
+        ],
+        "mpp": [
+          7.307103875048524,
+          7.307103875048524
+        ]
+      },
+      {
+        "level": 5,
+        "dimensions": [
+          1860,
+          1500
+        ],
+        "downsample": [
+          32.0,
+          32.0
+        ],
+        "mpp": [
+          14.614207750097048,
+          14.614207750097048
+        ]
+      },
+      {
+        "level": 6,
+        "dimensions": [
+          930,
+          750
+        ],
+        "downsample": [
+          64.0,
+          64.0
+        ],
+        "mpp": [
+          29.228415500194096,
+          29.228415500194096
+        ]
+      },
+      {
+        "level": 7,
+        "dimensions": [
+          465,
+          375
+        ],
+        "downsample": [
+          128.0,
+          128.0
+        ],
+        "mpp": [
+          58.45683100038819,
+          58.45683100038819
+        ]
+      }
+    ],
+    "mpp": [
+      0.45669399219053275,
+      0.45669399219053275
+    ],
+    "vendor": "generic-tiff",
+    "passed": true
+  },
+  {
+    "backend": "kfb",
+    "path": "/home/cdy/Projects/wsi-patchkit/uploads/2653490-1.kfb",
+    "bytes": 1146368352,
+    "sha256": "818b58f2b48d73eac90c23f9e86d7858c7ab2a7e02f8f515b074ef31f0911f02",
+    "checks": [
+      {
+        "level": 0,
+        "native_origin": [
+          1,
+          1
+        ],
+        "native_crop_equal": true,
+        "physical_equal": true,
+        "valid_centers": 64,
+        "varied_pixels": true
+      },
+      {
+        "level": 0,
+        "native_origin": [
+          7,
+          11
+        ],
+        "native_crop_equal": true,
+        "physical_equal": true,
+        "valid_centers": 64,
+        "varied_pixels": true
+      },
+      {
+        "level": 0,
+        "native_origin": [
+          29,
+          17
+        ],
+        "native_crop_equal": true,
+        "physical_equal": true,
+        "valid_centers": 64,
+        "varied_pixels": true
+      },
+      {
+        "level": 0,
+        "native_origin": [
+          28312,
+          33702
+        ],
+        "native_crop_equal": true,
+        "physical_equal": true,
+        "valid_centers": 64,
+        "varied_pixels": true
+      },
+      {
+        "level": 0,
+        "native_origin": [
+          28318,
+          33712
+        ],
+        "native_crop_equal": true,
+        "physical_equal": true,
+        "valid_centers": 64,
+        "varied_pixels": true
+      },
+      {
+        "level": 0,
+        "native_origin": [
+          28340,
+          33718
+        ],
+        "native_crop_equal": true,
+        "physical_equal": true,
+        "valid_centers": 64,
+        "varied_pixels": true
+      },
+      {
+        "level": 1,
+        "native_origin": [
+          1,
+          1
+        ],
+        "native_crop_equal": true,
+        "physical_equal": true,
+        "valid_centers": 64,
+        "varied_pixels": true
+      },
+      {
+        "level": 1,
+        "native_origin": [
+          7,
+          11
+        ],
+        "native_crop_equal": true,
+        "physical_equal": true,
+        "valid_centers": 64,
+        "varied_pixels": true
+      },
+      {
+        "level": 1,
+        "native_origin": [
+          29,
+          17
+        ],
+        "native_crop_equal": true,
+        "physical_equal": true,
+        "valid_centers": 64,
+        "varied_pixels": true
+      },
+      {
+        "level": 1,
+        "native_origin": [
+          14156,
+          16851
+        ],
+        "native_crop_equal": true,
+        "physical_equal": true,
+        "valid_centers": 64,
+        "varied_pixels": true
+      },
+      {
+        "level": 1,
+        "native_origin": [
+          14162,
+          16861
+        ],
+        "native_crop_equal": true,
+        "physical_equal": true,
+        "valid_centers": 64,
+        "varied_pixels": true
+      },
+      {
+        "level": 1,
+        "native_origin": [
+          14184,
+          16867
+        ],
+        "native_crop_equal": true,
+        "physical_equal": true,
+        "valid_centers": 64,
+        "varied_pixels": true
+      },
+      {
+        "level": 2,
+        "native_origin": [
+          1,
+          1
+        ],
+        "native_crop_equal": true,
+        "physical_equal": true,
+        "valid_centers": 64,
+        "varied_pixels": true
+      },
+      {
+        "level": 2,
+        "native_origin": [
+          7,
+          11
+        ],
+        "native_crop_equal": true,
+        "physical_equal": true,
+        "valid_centers": 64,
+        "varied_pixels": true
+      },
+      {
+        "level": 2,
+        "native_origin": [
+          29,
+          17
+        ],
+        "native_crop_equal": true,
+        "physical_equal": true,
+        "valid_centers": 64,
+        "varied_pixels": true
+      },
+      {
+        "level": 2,
+        "native_origin": [
+          7078,
+          8426
+        ],
+        "native_crop_equal": true,
+        "physical_equal": true,
+        "valid_centers": 64,
+        "varied_pixels": true
+      },
+      {
+        "level": 2,
+        "native_origin": [
+          7084,
+          8436
+        ],
+        "native_crop_equal": true,
+        "physical_equal": true,
+        "valid_centers": 64,
+        "varied_pixels": true
+      },
+      {
+        "level": 2,
+        "native_origin": [
+          7106,
+          8442
+        ],
+        "native_crop_equal": true,
+        "physical_equal": true,
+        "valid_centers": 64,
+        "varied_pixels": true
+      },
+      {
+        "level": 3,
+        "native_origin": [
+          1,
+          1
+        ],
+        "native_crop_equal": true,
+        "physical_equal": true,
+        "valid_centers": 64,
+        "varied_pixels": true
+      },
+      {
+        "level": 3,
+        "native_origin": [
+          7,
+          11
+        ],
+        "native_crop_equal": true,
+        "physical_equal": true,
+        "valid_centers": 64,
+        "varied_pixels": true
+      },
+      {
+        "level": 3,
+        "native_origin": [
+          29,
+          17
+        ],
+        "native_crop_equal": true,
+        "physical_equal": true,
+        "valid_centers": 64,
+        "varied_pixels": true
+      },
+      {
+        "level": 3,
+        "native_origin": [
+          3539,
+          4213
+        ],
+        "native_crop_equal": true,
+        "physical_equal": true,
+        "valid_centers": 64,
+        "varied_pixels": true
+      },
+      {
+        "level": 3,
+        "native_origin": [
+          3545,
+          4223
+        ],
+        "native_crop_equal": true,
+        "physical_equal": true,
+        "valid_centers": 64,
+        "varied_pixels": true
+      },
+      {
+        "level": 3,
+        "native_origin": [
+          3567,
+          4229
+        ],
+        "native_crop_equal": true,
+        "physical_equal": true,
+        "valid_centers": 64,
+        "varied_pixels": true
+      },
+      {
+        "level": 4,
+        "native_origin": [
+          1,
+          1
+        ],
+        "native_crop_equal": true,
+        "physical_equal": true,
+        "valid_centers": 64,
+        "varied_pixels": true
+      },
+      {
+        "level": 4,
+        "native_origin": [
+          7,
+          11
+        ],
+        "native_crop_equal": true,
+        "physical_equal": true,
+        "valid_centers": 64,
+        "varied_pixels": true
+      },
+      {
+        "level": 4,
+        "native_origin": [
+          29,
+          17
+        ],
+        "native_crop_equal": true,
+        "physical_equal": true,
+        "valid_centers": 64,
+        "varied_pixels": true
+      },
+      {
+        "level": 4,
+        "native_origin": [
+          1770,
+          2107
+        ],
+        "native_crop_equal": true,
+        "physical_equal": true,
+        "valid_centers": 64,
+        "varied_pixels": true
+      },
+      {
+        "level": 4,
+        "native_origin": [
+          1776,
+          2117
+        ],
+        "native_crop_equal": true,
+        "physical_equal": true,
+        "valid_centers": 64,
+        "varied_pixels": true
+      },
+      {
+        "level": 4,
+        "native_origin": [
+          1798,
+          2123
+        ],
+        "native_crop_equal": true,
+        "physical_equal": true,
+        "valid_centers": 64,
+        "varied_pixels": true
+      },
+      {
+        "level": 5,
+        "native_origin": [
+          1,
+          1
+        ],
+        "native_crop_equal": true,
+        "physical_equal": true,
+        "valid_centers": 64,
+        "varied_pixels": true
+      },
+      {
+        "level": 5,
+        "native_origin": [
+          7,
+          11
+        ],
+        "native_crop_equal": true,
+        "physical_equal": true,
+        "valid_centers": 64,
+        "varied_pixels": true
+      },
+      {
+        "level": 5,
+        "native_origin": [
+          29,
+          17
+        ],
+        "native_crop_equal": true,
+        "physical_equal": true,
+        "valid_centers": 64,
+        "varied_pixels": true
+      },
+      {
+        "level": 5,
+        "native_origin": [
+          885,
+          1054
+        ],
+        "native_crop_equal": true,
+        "physical_equal": true,
+        "valid_centers": 64,
+        "varied_pixels": true
+      },
+      {
+        "level": 5,
+        "native_origin": [
+          891,
+          1064
+        ],
+        "native_crop_equal": true,
+        "physical_equal": true,
+        "valid_centers": 64,
+        "varied_pixels": true
+      },
+      {
+        "level": 5,
+        "native_origin": [
+          913,
+          1070
+        ],
+        "native_crop_equal": true,
+        "physical_equal": true,
+        "valid_centers": 64,
+        "varied_pixels": true
+      }
+    ],
+    "levels": [
+      {
+        "level": 0,
+        "dimensions": [
+          84935,
+          101104
+        ],
+        "downsample": [
+          1.0,
+          1.0
+        ],
+        "mpp": [
+          0.21984902024269104,
+          0.21984902024269104
+        ]
+      },
+      {
+        "level": 1,
+        "dimensions": [
+          42467,
+          50552
+        ],
+        "downsample": [
+          2.0,
+          2.0
+        ],
+        "mpp": [
+          0.4396980404853821,
+          0.4396980404853821
+        ]
+      },
+      {
+        "level": 2,
+        "dimensions": [
+          21233,
+          25276
+        ],
+        "downsample": [
+          4.0,
+          4.0
+        ],
+        "mpp": [
+          0.8793960809707642,
+          0.8793960809707642
+        ]
+      },
+      {
+        "level": 3,
+        "dimensions": [
+          10616,
+          12638
+        ],
+        "downsample": [
+          8.0,
+          8.0
+        ],
+        "mpp": [
+          1.7587921619415283,
+          1.7587921619415283
+        ]
+      },
+      {
+        "level": 4,
+        "dimensions": [
+          5308,
+          6319
+        ],
+        "downsample": [
+          16.0,
+          16.0
+        ],
+        "mpp": [
+          3.5175843238830566,
+          3.5175843238830566
+        ]
+      },
+      {
+        "level": 5,
+        "dimensions": [
+          2654,
+          3159
+        ],
+        "downsample": [
+          32.0,
+          32.0
+        ],
+        "mpp": [
+          7.035168647766113,
+          7.035168647766113
+        ]
+      }
+    ],
+    "mpp": [
+      0.21984902024269104,
+      0.21984902024269104
+    ],
+    "vendor": "kfbio",
+    "passed": true
+  }
+]
