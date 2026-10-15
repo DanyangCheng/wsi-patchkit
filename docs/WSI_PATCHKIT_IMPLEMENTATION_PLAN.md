@@ -9,7 +9,8 @@
 见 [验收追踪表](PHYSICAL_SAMPLING_ACCEPTANCE.md)，后端准备见 [样本清单](PHYSICAL_SAMPLING_SAMPLES.md)。
 阶段 0 已交付独立参考自测与旧像素快照。阶段 1 已完成，见
 [阶段 1 实施记录](PHASE1_IMPLEMENTATION.md)。阶段 2 已完成，见
-[阶段 2 实施记录](PHASE2_IMPLEMENTATION.md)；阶段 3–6 保持待实施。
+[阶段 2 实施记录](PHASE2_IMPLEMENTATION.md)。阶段 3 已完成，见
+[阶段 3 实施记录](PHASE3_IMPLEMENTATION.md)；阶段 4–6 保持待实施。
 
 本文规划实现工作，不代表功能已经完成。类名和新增模块名为建议，职责和验收条件为实施依据。
 

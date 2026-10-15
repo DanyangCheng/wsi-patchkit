@@ -30,6 +30,19 @@
   PNG/noninteger TIFF pyramids, and legacy pixel snapshots. Bicubic, area,
   reflect, and physical streams remain phases 3–4.
 
+### 0.2.0 — phase 3 interpolation and padding
+
+- Added separable Keys bicubic (`a=-0.5`) and full native-axis reflect mapping
+  for every RGB kernel and native nearest, including one-pixel axes and far origins.
+- Added physical-footprint area weights with fractional phase, clamp/reflect
+  edges, bulk reflected-cell counting, and stable half-value quantization.
+- Applied output/read limits and address-space checks to all supported modes;
+  collapsed area footprints fail during planning before IO.
+- Sampling plans now include native dimensions for full-axis boundary mapping;
+  completely outside native requests require reliable pixel-format metadata.
+- Extended independent reference tests with rational area arithmetic, real
+  PNG/TIFF modes, extreme coordinates, and all kernel/padding limit combinations.
+
 ### Other changes
 
 - Added detection-manifest registration, disk-backed spatial indexing, and

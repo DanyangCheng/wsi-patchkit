@@ -1,10 +1,8 @@
-"""Center-based point sampling of a planned native block.
-
-This module samples globally defined physical centers. A native read rectangle
-only supplies pixels; it never sets the output phase or resize ratio.
-"""
+"""Physical-center point kernels and footprint area sampling of native blocks."""
 
 from __future__ import annotations
+
+import math
 
 import numpy as np
 from numpy.typing import NDArray
@@ -12,24 +10,165 @@ from numpy.typing import NDArray
 from .types import SamplingPlan
 
 
-def _local_indices(indices, origin: int, length: int):
-    """Clamp global integer neighbors before converting to local intp indices."""
-    end = origin + length - 1
-    if abs(origin) > 2**53 or abs(end) > 2**53:
-        # Preserve integer clipping when a metadata edge is not float64-exact.
+def _mapped(index: int, length: int, reflect: bool) -> int:
+    if not reflect:
+        return min(max(index, 0), length - 1)
+    if length == 1:
+        return 0
+    period = 2 * (length - 1)
+    q = index % period
+    return q if q < length else period - q
+
+
+def _indices(base, shift, plan, axis):
+    origin = plan.native_origin[axis]
+    length = plan.native_dimensions[axis]
+    reflect = plan.request.padding_mode == "reflect"
+    if length > 2**52 or np.any(np.abs(base) > 2**52):
+        # Python integer modulo preserves huge negative/positive phases and
+        # each distinct kernel neighbor before mapping, without int64 overflow.
         return np.fromiter(
-            (min(max(int(i), origin), end) - origin for i in indices),
+            (_mapped(int(i) + shift, length, reflect) - origin for i in base),
             dtype=np.intp,
-            count=len(indices),
+            count=len(base),
         )
-    return (np.clip(indices, origin, end) - origin).astype(np.intp)
+    indices = base.astype(np.int64) + shift
+    if reflect and length > 1:
+        period = 2 * (length - 1)
+        indices %= period
+        indices = np.minimum(indices, period - indices)
+    elif reflect:
+        indices = np.zeros_like(indices)
+    else:
+        indices = np.clip(indices, 0, length - 1)
+    return (indices - origin).astype(np.intp)
 
 
-def sample_constant(
-    source: NDArray[np.generic],
-    plan: SamplingPlan,
-) -> tuple[NDArray[np.generic], NDArray[np.bool_]]:
-    """Nearest or bilinear into an owned constant-padded output array."""
+def _keys(distance):
+    t = np.abs(distance)
+    return np.where(
+        t < 1,
+        1.5 * t**3 - 2.5 * t**2 + 1,
+        np.where(t < 2, -0.5 * t**3 + 2.5 * t**2 - 4 * t + 2, 0.0),
+    )
+
+
+def _point_axis(centers, plan, axis):
+    position = centers / plan.native_mpp[axis] - 0.5
+    if plan.request.interpolation == "nearest":
+        return [_indices(np.floor(position + 0.5), 0, plan, axis)], [
+            np.ones(len(centers))
+        ]
+    base = np.floor(position)
+    fraction = position - base
+    if plan.request.interpolation == "bilinear":
+        shifts, weights = (0, 1), (1 - fraction, fraction)
+    else:
+        shifts = (-1, 0, 1, 2)
+        # Fraction-relative distance avoids cancellation at far outside origins.
+        weights = [_keys(fraction - shift) for shift in shifts]
+    return [_indices(base, shift, plan, axis) for shift in shifts], weights
+
+
+def _area_weights(start, stop, plan, axis):
+    """Coalesce reflected/clamped footprint cells in O(mapped support) work.
+
+    Whole-cell counts use Python integers. Complete reflect periods and far
+    constant tails do not cause an iteration over the physical footprint.
+    """
+    length = plan.native_dimensions[axis]
+    origin = plan.native_origin[axis]
+    reflect = plan.request.padding_mode == "reflect"
+    width = stop - start
+    first, last = math.floor(start), math.ceil(stop) - 1
+    weights = {}
+
+    def add(index, weight):
+        local = _mapped(index, length, reflect) - origin
+        weights[local] = weights.get(local, 0.0) + weight
+
+    if first == last or length == 1:
+        add(first, width)
+    else:
+        add(first, 1 - (start - first))
+        fraction = stop - math.floor(stop)
+        add(last, fraction if fraction else 1.0)
+        lo, hi = first + 1, last - 1
+        if lo <= hi:
+            if not reflect:
+                if lo < 0:
+                    add(0, min(hi, -1) - lo + 1)
+                if hi >= length:
+                    add(length - 1, hi - max(lo, length) + 1)
+                for i in range(max(lo, 0), min(hi, length - 1) + 1):
+                    add(i, 1)
+            elif hi - lo + 1 <= plan.read_size[axis]:
+                for i in range(lo, hi + 1):
+                    add(i, 1)
+            else:
+                period = 2 * (length - 1)
+
+                def count(residue):
+                    return (hi - residue) // period - (lo - 1 - residue) // period
+
+                for i in range(origin, origin + plan.read_size[axis]):
+                    occurrences = count(i)
+                    if i not in (0, length - 1):
+                        occurrences += count(period - i)
+                    if occurrences:
+                        add(i, occurrences)
+    ordered = sorted(weights.items())
+    return (
+        np.fromiter((i for i, _ in ordered), dtype=np.intp),
+        np.fromiter((w for _, w in ordered), dtype=np.float64),
+    )
+
+
+def _sample_area(source, plan, output, x_columns, y_rows):
+    request = plan.request
+    # Generate one pixel's support at a time; no W x native-width matrix.
+    # Sum unnormalized coverage before dividing to preserve half-value ties.
+    for row in y_rows:
+        start_y = (
+            request.origin_um[1] + int(row) * request.target_mpp[1]
+        ) / plan.native_mpp[1]
+        stop_y = (
+            request.origin_um[1] + (int(row) + 1) * request.target_mpp[1]
+        ) / plan.native_mpp[1]
+        iy, wy = _area_weights(start_y, stop_y, plan, 1)
+        for col in x_columns:
+            start_x = (
+                request.origin_um[0] + int(col) * request.target_mpp[0]
+            ) / plan.native_mpp[0]
+            stop_x = (
+                request.origin_um[0] + (int(col) + 1) * request.target_mpp[0]
+            ) / plan.native_mpp[0]
+            ix, wx = _area_weights(start_x, stop_x, plan, 0)
+            width_x, width_y = stop_x - start_x, stop_y - start_y
+            if width_x > 1e150 or width_y > 1e150:
+                # Scale huge coverage counts before products can overflow.
+                wx = wx / width_x
+                y_weights = wy / width_y
+                denominator = 1.0
+            else:
+                y_weights = wy
+                denominator = width_x * width_y
+            value = np.zeros(3, dtype=np.float64)
+            for offset in range(0, len(iy), 64):
+                stop = offset + 64
+                values = (
+                    source[iy[offset:stop, None], ix[None, :]].astype(np.float64)
+                    * wx[None, :, None]
+                    * y_weights[offset:stop, None, None]
+                )
+                value += values.sum(axis=(0, 1), dtype=np.float64)
+            output[int(row), int(col)] = np.clip(
+                np.floor(value / denominator + 0.5), 0, 255
+            ).astype(np.uint8)
+
+
+def sample_patch(source: NDArray[np.generic], plan: SamplingPlan):
+    """Sample into an owned output, with a mask independent of padding/kernels."""
     request = plan.request
     width, height = request.output_size
     output = np.empty((height, width, source.shape[2]), dtype=source.dtype)
@@ -45,39 +184,28 @@ def sample_constant(
     valid_x = (xs >= 0) & (xs < plan.source_extent_um[0])
     valid_y = (ys >= 0) & (ys < plan.source_extent_um[1])
     mask = valid_y[:, None] & valid_x[None, :]
-    x_columns = np.flatnonzero(valid_x)
-    y_rows = np.flatnonzero(valid_y)
+    if request.padding_mode == "reflect":
+        x_columns, y_rows = np.arange(width), np.arange(height)
+    else:
+        x_columns, y_rows = np.flatnonzero(valid_x), np.flatnonzero(valid_y)
     if not len(x_columns) or not len(y_rows):
         return output, mask
-    # Only valid centers enter native-coordinate arithmetic. Far outside
-    # centers need no integer conversion and cannot overflow an intp index.
-    sx = xs[valid_x] / plan.native_mpp[0] - 0.5
-    sy = ys[valid_y] / plan.native_mpp[1] - 0.5
-    origin_x, origin_y = plan.native_origin
-    read_width, read_height = plan.read_size
-    x_start, x_stop = int(x_columns[0]), int(x_columns[-1]) + 1
-    if request.interpolation == "nearest":
-        ix = _local_indices(np.floor(sx + 0.5), origin_x, read_width)
-        iy = _local_indices(np.floor(sy + 0.5), origin_y, read_height)
-        # Bound temporary pixel gathers; each strip uses the same global axes.
-        for offset in range(0, len(y_rows), 64):
-            rows = y_rows[offset : offset + 64]
-            output[int(rows[0]) : int(rows[-1]) + 1, x_start:x_stop] = source[
-                iy[offset : offset + 64, None], ix[None, :]
-            ]
+    if request.interpolation == "area":
+        _sample_area(source, plan, output, x_columns, y_rows)
         return output, mask
-    floor_x, floor_y = np.floor(sx), np.floor(sy)
-    fx, fy = sx - floor_x, sy - floor_y
-    ix = [_local_indices(floor_x + shift, origin_x, read_width) for shift in (0, 1)]
-    iy = [_local_indices(floor_y + shift, origin_y, read_height) for shift in (0, 1)]
-    wx, wy = (1 - fx, fx), (1 - fy, fy)
+    ix, wx = _point_axis(xs[x_columns], plan, 0)
+    iy, wy = _point_axis(ys[y_rows], plan, 1)
+    x_start, x_stop = int(x_columns[0]), int(x_columns[-1]) + 1
     for offset in range(0, len(y_rows), 64):
         rows = y_rows[offset : offset + 64]
         stop = offset + len(rows)
+        destination = output[int(rows[0]) : int(rows[-1]) + 1, x_start:x_stop]
+        if request.interpolation == "nearest":
+            destination[...] = source[iy[0][offset:stop, None], ix[0][None, :]]
+            continue
         value = np.zeros((len(rows), len(x_columns), 3), dtype=np.float64)
-        # Match the scalar contract's multiplication order (pixel * wx * wy).
-        for y_neighbor in (0, 1):
-            for x_neighbor in (0, 1):
+        for y_neighbor in range(len(iy)):
+            for x_neighbor in range(len(ix)):
                 value += (
                     source[
                         iy[y_neighbor][offset:stop, None], ix[x_neighbor][None, :]
@@ -85,7 +213,5 @@ def sample_constant(
                     * wx[x_neighbor][None, :, None]
                     * wy[y_neighbor][offset:stop, None, None]
                 )
-        output[int(rows[0]) : int(rows[-1]) + 1, x_start:x_stop] = np.clip(
-            np.floor(value + 0.5), 0, 255
-        ).astype(np.uint8)
+        destination[...] = np.clip(np.floor(value + 0.5), 0, 255).astype(np.uint8)
     return output, mask

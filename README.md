@@ -6,7 +6,7 @@ whole-slide images (WSIs). Version 0.2 provides:
 - ordinary image (Pillow), TIFF, KFB, and OpenSlide readers with a common coordinate contract;
 - physical-resolution (MPP) metadata and level selection;
 - strict continuous physical requests, output grids, and IO-free sampling plans;
-- exact synchronous nearest/bilinear reads with physical-center valid masks;
+- exact synchronous nearest/bilinear/bicubic/area reads with physical-center valid masks;
 - target-MPP-aligned, boundary-padded patch reads;
 - deterministic grid, random, indexed, and tissue-filtered sampling;
 - lazy patch streams;
@@ -21,9 +21,9 @@ formats intentionally remain application concerns.
 Phase 1 exposes `PhysicalPatchRequest`, `OutputGrid`, `SamplingLimits`,
 `SamplingPlan`, and `plan_physical_read`. Planning preserves negative and
 fractional origins, selects the native level, and budgets one native region
-without reading or allocating pixel arrays. Phase 2 adds exact synchronous
-nearest/bilinear reads with constant padding. Extended interpolation/padding
-and complete result streams are scheduled for phases 3–4.
+without reading or allocating pixel arrays. Exact synchronous reads support
+nearest/bilinear/bicubic/area with constant or reflect padding. Complete
+physical result streams are scheduled for phase 4.
 
 ```python
 from wsi_patchkit import ImageReader, PhysicalPatchRequest, SamplingLimits, plan_physical_read
@@ -118,8 +118,33 @@ with custom limits, pass `limits=plan.limits` to the read too. Results contain
 `request/image/valid_mask/grid/source_level/plan`, and both arrays own their data.
 The synchronous reader is borrowed and remains caller-owned on success or error.
 
-In the current synchronous API, bicubic, area, and reflect raise explicit errors
-before metadata or pixel IO. Planning already describes their phase-3 geometry.
+RGB sampling supports:
+
+| Kernel | Sampling rule |
+| --- | --- |
+| nearest | Center index `floor(s + 0.5)` |
+| bilinear | Two neighbors per axis, float64 separable weights |
+| bicubic | Four neighbors per axis, Keys cubic with `a=-0.5`, no added antialias filter |
+| area | Physical footprint overlap weights; both target MPP axes must be at least the selected native MPP |
+
+Each kernel accepts `padding_mode="constant"` or `"reflect"`. Reflect maps
+each native kernel neighbor on the entire original axis, with NumPy's
+nonrepeating endpoint rule; a one-pixel axis repeats its sole pixel. Entirely
+outside reflect requests may read the mapped native region, but their center
+masks remain false. Far origins and very wide area footprints use integer
+period mapping and bulk cell counts, so their distance does not enlarge IO.
+Native mode still permits only nearest and requires reliable pixel-format
+metadata for completely outside requests under either padding mode.
+
+Area uses the output pixel's physical rectangle, includes all overlapping
+native cells, and preserves fractional phase. Constant fills invalid centers
+as whole pixels; for valid centers its footprint beyond native edges clamps
+to edge pixels. Reflect folds each footprint cell. Coverage accumulates in
+float64 before normalization and uint8 quantization. Very large counts are
+scaled before multiplication to keep values finite. If floating precision
+collapses a footprint, planning rejects it before IO. All modes share the same
+output/read limits, including the actual single-region neighbor rectangle.
+
 The existing `read_aligned_patch*`, `PatchStream`, and torch adapter keep their
 legacy sampling path; physical result streams arrive in phase 4.
 

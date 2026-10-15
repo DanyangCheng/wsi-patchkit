@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import math
+from fractions import Fraction
 
 import numpy as np
 
@@ -50,8 +51,10 @@ def point_weights(position, mode):
     raise ValueError(f"unknown interpolation: {mode}")
 
 
-def area_weights(start, stop):
+def area_weights(start, stop, *, exact=False):
     """Interval coordinates measured in native pixel boundary units."""
+    if exact:
+        start, stop = Fraction(float(start)), Fraction(float(stop))
     return [
         (i, (min(stop, i + 1) - max(start, i)) / (stop - start))
         for i in range(math.floor(start), math.ceil(stop))
@@ -115,15 +118,40 @@ def sample_rgb(
                 wx = area_weights(
                     (origin[0] + col * target[0]) / native[0],
                     (origin[0] + (col + 1) * target[0]) / native[0],
+                    exact=True,
                 )
                 wy = area_weights(
                     (origin[1] + row * target[1]) / native[1],
                     (origin[1] + (row + 1) * target[1]) / native[1],
+                    exact=True,
                 )
             else:
                 wx = point_weights(ux / native[0] - 0.5, mode)
                 wy = point_weights(uy / native[1] - 0.5, mode)
             value = np.zeros(3, dtype=np.float64)
+            if mode == "area":
+                # Rational footprint arithmetic independently resolves exact
+                # uint8 half-value ties; the final reference is float64.
+                value = np.array(
+                    [
+                        float(
+                            sum(
+                                int(
+                                    image[
+                                        mapped(iy, height), mapped(ix, width), channel
+                                    ]
+                                )
+                                * weight_x
+                                * weight_y
+                                for iy, weight_y in wy
+                                for ix, weight_x in wx
+                            )
+                        )
+                        for channel in range(3)
+                    ]
+                )
+                raw[row, col] = value
+                continue
             for iy, weight_y in wy:
                 for ix, weight_x in wx:
                     value += (

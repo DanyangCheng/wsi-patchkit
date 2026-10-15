@@ -6,7 +6,7 @@ import numpy as np
 
 from .geometry import _as_rgb
 from .io.base import SlideReader
-from .resampling import sample_constant
+from .resampling import sample_patch
 from .sampling_plan import DEFAULT_LIMITS, plan_physical_read
 from .types import (
     PhysicalPatchRequest,
@@ -17,17 +17,19 @@ from .types import (
 )
 
 
-def _check_shape(plan, channels, dtype):
+def _check_shape(plan, channels, dtype, *, read=False):
     """Catch address-space shape overflow before attempting NumPy allocation."""
-    width, height = plan.grid.output_size
+    size = plan.read_size if read else plan.grid.output_size
+    field = "read_size" if read else "output_size"
+    width, height = size
     maximum = np.iinfo(np.intp).max
     if (
         max(width, height, channels) > maximum
         or width * height * channels * dtype.itemsize > maximum
     ):
         raise ValueError(
-            f"output_size cannot be addressed: slide={plan.request.slide!r}, "
-            f"source_level={plan.source_level}, output_size={plan.grid.output_size}, "
+            f"{field} cannot be addressed: slide={plan.request.slide!r}, "
+            f"source_level={plan.source_level}, {field}={size}, "
             f"channels={channels}, dtype={dtype}"
         )
 
@@ -78,25 +80,15 @@ def read_physical_patch_result(
     limits: SamplingLimits = DEFAULT_LIMITS,
     plan: SamplingPlan | None = None,
 ) -> PhysicalPatchResult:
-    """Read nearest/bilinear + constant with an exact physical center mask.
+    """Read an exact physical patch with an independent center-valid mask.
 
     Metadata IO is allowed even for fully outside requests; pixel IO is not.
     A supplied plan must equal the plan for this metadata/request/limits; pass
     its limits explicitly when using custom limits. Readers remain borrowed.
-    Unsupported phase-3 modes fail before metadata or pixel IO.
+    RGB supports nearest/bilinear/bicubic/area; native supports nearest.
     """
     if not isinstance(request, PhysicalPatchRequest):
         raise ValueError("request must be a PhysicalPatchRequest")
-    if request.interpolation not in ("nearest", "bilinear"):
-        raise ValueError(
-            f"interpolation={request.interpolation!r} "
-            "is not supported by physical reads yet"
-        )
-    if request.padding_mode != "constant":
-        raise ValueError(
-            f"padding_mode={request.padding_mode!r} "
-            "is not supported by physical reads yet"
-        )
     if plan is not None and not isinstance(plan, SamplingPlan):
         raise ValueError("plan must be a SamplingPlan")
     if metadata is None:
@@ -112,6 +104,15 @@ def read_physical_patch_result(
     else:
         channels, dtype = 1, np.dtype("uint8")  # Refined after an in-bounds read.
     _check_shape(plan, channels, dtype)
+    if plan.pixel_format is not None:
+        _check_shape(
+            plan,
+            plan.pixel_format.channels,
+            np.dtype(plan.pixel_format.dtype),
+            read=True,
+        )
+    else:
+        _check_shape(plan, channels, dtype, read=True)
     if plan.read_pixels == 0:
         # Native outside format was checked by the planner; never infer via IO.
         image = np.empty(
@@ -125,5 +126,5 @@ def read_physical_patch_result(
         )
         region = _region_format(region, plan)
         _check_shape(plan, region.shape[2], region.dtype)
-        image, mask = sample_constant(region, plan)
+        image, mask = sample_patch(region, plan)
     return PhysicalPatchResult(request, image, mask, plan.grid, plan.source_level, plan)

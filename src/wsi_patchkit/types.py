@@ -389,6 +389,7 @@ class SamplingPlan:
     read_size: Size
     limits: SamplingLimits
     native_mpp: MPP
+    native_dimensions: Size
     source_extent_um: tuple[float, float]
     pixel_format: PixelFormat | None
 

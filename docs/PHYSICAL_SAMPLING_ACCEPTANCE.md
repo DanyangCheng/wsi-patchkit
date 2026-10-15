@@ -59,3 +59,12 @@ A01/A02/A03/A05/A07/A14/A15 对 nearest/bilinear + constant 的同步子集已�
 扩展插值/reflect 按阶段 3，流与 vendor 完整验收按阶段 4–5；原始 A 编号与输入/预期保持。
 本轮相关整组：401 passed（新增阶段 2 测试 118 项），Ruff/格式/差异检查通过；
 运行环境与限制见阶段 2 实施记录。
+
+## 阶段 3 更新
+
+A03/A05/A06/A13/A14 的同步模式已补齐，见 [阶段 3 实施记录](PHASE3_IMPLEMENTATION.md)。
+tests/test_physical_sampling_modes.py 覆盖四种核×两种填充、单像素轴、远距反射、area footprint、
+所有限额组合与 native 约束；PNG/TIFF 的已有同步回归扩展到四种核。
+area 半值参考使用独立有理数运算修复浮点累加误差，具体证据见实施记录。
+完整流验收及 vendor 多层校准按阶段 4–5，不将同步模拟/可重建样本通过等同于全部 backend 验收。
+本轮相关整组：530 passed，新增 129 项覆盖；Ruff/格式/差异检查通过，运行环境见阶段 3 实施记录。

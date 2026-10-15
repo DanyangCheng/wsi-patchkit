@@ -155,3 +155,17 @@ def test_area_phase_boundary_and_reflection():
         assert image[0, 0, 0] == expected
     with pytest.raises(ValueError, match="enlarge"):
         sample_rgb(gradient(), origin=(0, 0), target=(0.5, 2), size=(1, 1), mode="area")
+
+
+def test_area_exact_rational_half_value():
+    # A 3x2 footprint has sum=765, mean=127.5, so uint8 must be 128.
+    image = np.repeat(
+        np.array([[128, 127, 128], [127, 128, 127]], dtype=np.uint8)[..., None],
+        3,
+        axis=2,
+    )
+    result, _, _, raw = sample_rgb(
+        image, origin=(0, 0), target=(3, 2), size=(1, 1), mode="area"
+    )
+    np.testing.assert_array_equal(raw, [[[127.5] * 3]])
+    np.testing.assert_array_equal(result, [[[128] * 3]])

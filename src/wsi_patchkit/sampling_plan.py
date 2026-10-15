@@ -52,6 +52,7 @@ def _kernel_bounds(request, axis, index, native_mpp):
         )
         if stop <= start:
             raise ValueError(f"area footprint[{axis}] collapses at floating precision")
+        derived_finite(stop - start, f"area footprint width[{axis}]")
         return math.floor(start), math.ceil(stop) - 1
     position = derived_finite(
         _center(origin, target, index) / native_mpp - 0.5,
@@ -143,10 +144,10 @@ def _select_level(metadata: SlideMetadata, request: PhysicalPatchRequest) -> Lev
     )
 
 
-def _validate_pixel_format(selected, request, *, no_read):
+def _validate_pixel_format(selected, request, *, outside):
     pixel_format = selected.pixel_format
     if pixel_format is None:
-        if request.color_mode == "native" and no_read:
+        if request.color_mode == "native" and outside:
             raise ValueError("pixel_format is required for an outside native request")
         return
     channels = integer(pixel_format.channels, "pixel_format.channels", minimum=1)
@@ -246,8 +247,25 @@ def plan_physical_read(
                 extent[axis],
             )
         )
-    no_read = request.padding_mode == "constant" and any(lo == hi for lo, hi in valid)
-    _validate_pixel_format(selected, request, no_read=no_read)
+        if request.interpolation == "area":
+            origin = request.origin_um[axis]
+            end = origin + request.output_size[axis] * request.target_mpp[axis]
+            spacing = request.target_mpp[axis]
+            if spacing < math.ulp(max(abs(origin), abs(end))) or spacing / native_mpp[
+                axis
+            ] < math.ulp(
+                max(abs(origin / native_mpp[axis]), abs(end / native_mpp[axis]))
+            ):
+                start, stop = (
+                    valid[-1]
+                    if request.padding_mode == "constant"
+                    else (0, request.output_size[axis])
+                )
+                for index in range(start, stop):
+                    _kernel_bounds(request, axis, index, native_mpp[axis])
+    outside = any(lo == hi for lo, hi in valid)
+    no_read = request.padding_mode == "constant" and outside
+    _validate_pixel_format(selected, request, outside=outside)
     origin = location = None
     read_size = (0, 0)
     if not no_read:
@@ -278,6 +296,7 @@ def plan_physical_read(
         read_size=read_size,
         limits=limits,
         native_mpp=native_mpp,
+        native_dimensions=selected.dimensions,
         source_extent_um=tuple(extent),
         pixel_format=selected.pixel_format,
     )

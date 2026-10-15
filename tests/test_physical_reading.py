@@ -255,7 +255,7 @@ def test_far_constant_skips_pixel_io_and_native_integer_conversion(origin):
         (np.array([[[100, 50, 0, 255]]], dtype=np.uint8), [100, 50, 0]),
     ],
 )
-@pytest.mark.parametrize("mode", ["nearest", "bilinear"])
+@pytest.mark.parametrize("mode", ["nearest", "bilinear", "bicubic", "area"])
 def test_rgb_gray_and_white_rgba(image, expected, mode):
     result = read_physical_patch_result(
         Reader(image), request(output_size=(1, 1), interpolation=mode)
@@ -376,11 +376,11 @@ def test_metadata_cache_and_precomputed_plan_validation():
         (dict(padding_mode="reflect"), "padding_mode"),
     ],
 )
-def test_unimplemented_modes_rejected_before_metadata_io(changes, field):
+def test_extended_modes_reach_synchronous_reader(changes, field):
     reader = Reader()
-    with pytest.raises(ValueError, match=field):
-        read_physical_patch_result(reader, request(**changes))
-    assert not reader.calls and not reader.metadata_calls
+    result = read_physical_patch_result(reader, request(**changes))
+    np.testing.assert_array_equal(result.image, reader.image[:2, :3])
+    assert len(reader.calls) == 1 and len(reader.metadata_calls) == 1
 
 
 def test_limits_and_invalid_level_fail_before_allocation_or_pixel_io(monkeypatch):
@@ -447,7 +447,7 @@ def test_reader_shape_format_mismatch_and_raw_error():
     assert captured.value is failure and not reader.closed
 
 
-@pytest.mark.parametrize("mode", ["nearest", "bilinear"])
+@pytest.mark.parametrize("mode", ["nearest", "bilinear", "bicubic", "area"])
 def test_real_png_exact_result(tmp_path, mode):
     path = tmp_path / "gradient.png"
     Image.fromarray(gradient()).save(path)
@@ -474,7 +474,7 @@ def test_real_png_exact_result(tmp_path, mode):
 
 
 @pytest.mark.parametrize("base,reduced", [(1000, 333), (800, 267)])
-@pytest.mark.parametrize("mode", ["nearest", "bilinear"])
+@pytest.mark.parametrize("mode", ["nearest", "bilinear", "bicubic", "area"])
 def test_real_noninteger_tiff_level_sampling(tmp_path, base, reduced, mode):
     _, path, pixels = write_backend_samples(tmp_path, base, reduced)
     with TiffReader() as reader:
@@ -485,7 +485,10 @@ def test_real_noninteger_tiff_level_sampling(tmp_path, base, reduced, mode):
                 path,
                 origin_um=((index + 0.25) * native[0], (index - 0.25) * native[1]),
                 output_size=(3, 2),
-                target_mpp=(0.7 * native[0], 1.3 * native[1]),
+                target_mpp=(
+                    (1.7 if mode == "area" else 0.7) * native[0],
+                    1.3 * native[1],
+                ),
                 level=1,
                 interpolation=mode,
             )

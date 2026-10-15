@@ -5,7 +5,7 @@
 阶段 1 已实现：PhysicalPatchRequest（含 from_legacy）、OutputGrid、SamplingLimits、SamplingPlan、
 plan_physical_read 与 canvas_rounding 传播。阶段 2 已实现 read_physical_patch_result 与
 PhysicalPatchResult，支持 nearest/bilinear + constant 及 native nearest。
-bicubic/area/reflect 的像素实现及完整结果流按阶段 3–4 实施。
+阶段 3 已补齐 bicubic/area/reflect 像素实现与所有模式的统一限额；完整结果流按阶段 4 实施。
 
 ## 需求版本
 
@@ -28,7 +28,7 @@ PhysicalPatchRequest.from_legacy(request) -> PhysicalPatchRequest
 SamplingLimits(max_output_pixels=16_777_216, max_read_pixels=67_108_864)
 OutputGrid(origin_um, target_mpp, output_size)
 SamplingPlan(request, grid, source_level, native_origin, read_location,
-    read_size, limits, native_mpp, source_extent_um, pixel_format)
+    read_size, limits, native_mpp, native_dimensions, source_extent_um, pixel_format)
 PhysicalPatchResult(request, image, valid_mask, grid, source_level, plan)
 plan_physical_read(metadata, request, *, limits=SamplingLimits()) -> SamplingPlan
 read_physical_patch_result(reader, request, *, metadata=None,
@@ -92,6 +92,9 @@ clamp 是 constant 的核边界规则，不是第三种公开 padding_mode。
 constant 的无效中心仍整像素填充；有效中心越界的 footprint 单元 clamp 到原生边缘，
 不混入 fill、不丢弃面积重新归一化。reflect 对 footprint 的每个整轴单元索引执行上式映射。
 因此边界语义与点核一致。旧 area 保留原整数包围框 Pillow BOX 行为。
+area 计算先累加未归一化的覆盖面积分子，再除以完整 footprint 面积，以避免分数权重提前归一化
+引入半值量化偏差；极大覆盖量先缩放，防止 float64 乘法溢出。浮点精度使 footprint 边界重合时，
+规划在 IO 前明确报错。独立小型 area 参考用有理数重叠权重累加后转换 float64，并验证半值量化。
 
 ## 格式与严格校验
 
@@ -108,7 +111,7 @@ RGB 只接受 uint8，二维灰度或 HWC 单通道复制三通道；RGBA 白底
 RGB fill 为 [0,255] 整数标量或恰好三分量整数元组。
 native 只允许 nearest，支持 bool、uint8/16/32/64、int8/16/32/64，二维统一为 HWC 单通道；
 浮点、复数、对象与连续核拒绝。native fill 为该 dtype 可表达的整数标量（bool dtype 接受整数 0/1），广播各通道。
-dtype/通道来自所选层可靠 PixelFormat；完全越界且格式未知时明确报错，禁止为推断格式读取像素。
+dtype/通道来自所选层可靠 PixelFormat；两种 padding 下完全越界且格式未知时均明确报错，禁止为推断格式读取像素。
 有 IO 时核查 region 的尺寸/dtype/通道与声明一致；所有返回数据须独立于 reader 缓冲区。
 
 ## 读取规划、画布与限额
@@ -120,6 +123,8 @@ dtype/通道来自所选层可靠 PixelFormat；完全越界且格式未知时�
 阶段 1 规划保留点核的零权重邻点，预算含这些像素；constant 用端点及标量二分查找，
 reflect 最坏 O(width+height) 标量工作量、O(1) 辅助内存。area 的单个 footprint 反射范围用解析极值计算，
 不逐个枚举巨大 footprint 内的原生像素；任何规划路径都不分配 HW 或轴向坐标数组。
+area 遇到步长小于坐标 ULP 的精度风险时额外标量检查轴向 footprint，防止内部像素范围坍缩。
+SamplingPlan.native_dimensions 保存整张所选原生层尺寸，不能以局部 read_size 作为反射周期。
 level-0 起点使用 `ceil(nextafter(native_index*axis_downsample,-inf))`，并通过后端样本验证映射。
 
 默认输出 16,777,216 像素（4096²），读取 67,108,864 像素（8192²），
