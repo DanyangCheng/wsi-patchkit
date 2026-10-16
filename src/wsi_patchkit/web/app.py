@@ -242,6 +242,7 @@ def create_app(
         Mapping[str, IndexedOverlay | DetectionOverlay | str | Path],
     ]
     | None = None,
+    source_mpp: float | None = None,
     manifest_slide_id_aliases: Mapping[str, str] | None = None,
     reader: SlideReader | None = None,
     reader_factory: Callable[[], SlideReader] | None = None,
