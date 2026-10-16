@@ -879,7 +879,7 @@
       if (info.width !== slideMetadata.width || info.height !== slideMetadata.height) {
         throw new Error("IIIF 尺寸与切片元数据不一致");
       }
-      const metadata = { ...slideMetadata, path: record.path };
+      const metadata = { ...slideMetadata, path: record.path, has_predictions: record.has_predictions };
       slides.set(slideId, metadata);
       currentSlide = metadata;
       populateCropLevels();
@@ -973,7 +973,13 @@
         button.dataset.slideId = record.id;
         button.dataset.search = `${record.id} ${record.path || ""}`.toLocaleLowerCase();
         button.textContent = name;
-        button.title = record.path || record.id;
+        button.classList.toggle("has-predictions", Boolean(record.has_predictions));
+        button.title = record.has_predictions
+          ? `${record.path || record.id} · 已有预测结果`
+          : record.path || record.id;
+        if (record.has_predictions) {
+          button.setAttribute("aria-label", `${name}，已有预测结果`);
+        }
         button.addEventListener("click", () => openSlide(record.id));
         row.append(button);
         list.append(row);
@@ -1063,7 +1069,10 @@
       const records = await response.json();
       const ids = records.map((record) => record.id);
       const previous = [...slides.keys()];
-      if (ids.length === previous.length && ids.every((id, index) => id === previous[index])) {
+      if (ids.length === previous.length && ids.every((id, index) => (
+        id === previous[index] &&
+        records[index].has_predictions === slides.get(id)?.has_predictions
+      ))) {
         return;
       }
       slides = new Map(records.map((record) => [

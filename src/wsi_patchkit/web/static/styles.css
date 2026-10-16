@@ -273,6 +273,22 @@ select:focus-visible {
   color: #7ce8cc;
 }
 
+#slide-list button.has-predictions {
+  color: #8fc7ff;
+}
+
+#slide-list button.has-predictions::before {
+  content: "●";
+  margin-right: 7px;
+  font-size: 9px;
+}
+
+.slide-prediction-legend {
+  margin: 0 4px 7px;
+  color: #8fc7ff;
+  font-size: 11px;
+}
+
 .slide-empty {
   margin: 14px 0 8px;
   color: #8592a5;

@@ -137,7 +137,7 @@ async def test_slide_directory_hot_scan_adds_and_removes_stable_files(
         _write_slide(first)
         assert (await client.get("/api/slides")).json() == []
         assert (await client.get("/api/slides")).json() == [
-            {"id": "first.tif", "path": "first.tif"}
+            {"id": "first.tif", "path": "first.tif", "has_predictions": False}
         ]
         assert (await client.get("/api/slides/first.tif")).status_code == 200
         first.unlink()
@@ -149,7 +149,7 @@ async def test_slide_directory_hot_scan_adds_and_removes_stable_files(
         _write_slide(second)
         assert (await client.get("/api/slides")).json() == []
         assert (await client.get("/api/slides")).json() == [
-            {"id": "group_nested_second.tif", "path": "group/nested/second.tif"}
+            {"id": "group_nested_second.tif", "path": "group/nested/second.tif", "has_predictions": False}
         ]
 
 
@@ -356,7 +356,7 @@ async def test_slide_list_does_not_open_slides(tmp_path: Path) -> None:
         response = await client.get("/api/slides")
 
     assert response.status_code == 200
-    assert response.json() == [{"id": "unreadable.svs"}]
+    assert response.json() == [{"id": "unreadable.svs", "has_predictions": False}]
 
 
 @pytest.fixture
@@ -453,7 +453,7 @@ async def test_viewer_serves_metadata_tiles_and_frontend(tmp_path: Path) -> None
         script = await client.get("/static/app.js")
 
     assert slides.status_code == 200
-    assert slides.json() == [{"id": "case-001"}]
+    assert slides.json() == [{"id": "case-001", "has_predictions": False}]
     assert metadata.status_code == 200
     assert metadata.json()["mpp"] == [0.25, 0.25]
     assert info.status_code == 200
@@ -466,8 +466,8 @@ async def test_viewer_serves_metadata_tiles_and_frontend(tmp_path: Path) -> None
     assert cached.status_code == 304
     assert index.status_code == 200
     assert "WSI PatchKit Viewer" in index.text
-    assert "/static/styles.css?v=13" in index.text
-    assert "/static/app.js?v=19" in index.text
+    assert "/static/styles.css?v=14" in index.text
+    assert "/static/app.js?v=20" in index.text
     assert script.status_code == 200
     assert "dragToPan" in script.text
     assert "populateSlideMenu" in script.text

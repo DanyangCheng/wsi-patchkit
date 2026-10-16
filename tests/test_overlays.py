@@ -340,6 +340,7 @@ async def test_viewer_serves_registered_overlay_metadata_and_tiles(
         {"case-001": slide},
         overlays={"case-001": {"prediction": overlay}},
         reader=TiffReader(),
+        upload_dir=tmp_path / "uploads",
         tile_size=4,
     )
     transport = httpx.ASGITransport(app=app)
@@ -347,6 +348,8 @@ async def test_viewer_serves_registered_overlay_metadata_and_tiles(
         transport=transport,
         base_url="http://testserver",
     ) as client:
+        listing = await client.get("/api/slides")
+        assert listing.json() == [{"id": "case-001", "has_predictions": True}]
         metadata = await client.get("/api/slides/case-001")
         overlays = await client.get("/api/slides/case-001/overlays")
         info = await client.get(

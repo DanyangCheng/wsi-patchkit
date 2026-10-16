@@ -634,7 +634,7 @@ def create_app(
         return {"filename": filename, "deleted": True}
 
     @app.get("/api/slides", name="list_slides")
-    async def list_slides() -> list[dict[str, str]]:
+    async def list_slides() -> list[dict[str, object]]:
         relative_paths: dict[str, str] = {}
         if slide_scanner is not None:
             try:
@@ -646,7 +646,10 @@ def create_app(
         # WSI metadata can be expensive, so defer it until a slide is selected.
         records = []
         for slide_id in registry:
-            record = {"id": slide_id}
+            record: dict[str, object] = {
+                "id": slide_id,
+                "has_predictions": bool(overlay_registry.for_slide(slide_id)),
+            }
             if slide_id in uploaded_sources:
                 record["path"] = f"上传切片/{uploaded_sources[slide_id].path.name}"
             elif slide_id in relative_paths:
