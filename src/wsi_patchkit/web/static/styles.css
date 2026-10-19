@@ -719,3 +719,49 @@ button.primary,
     width: min(390px, calc(100vw - 20px));
   }
 }
+
+.crop-panel {
+  max-height: calc(100% - 36px);
+  overflow-y: auto;
+}
+.crop-panel-title {
+  position: sticky;
+  top: -14px;
+  z-index: 2;
+  padding: 7px 0;
+  background: #0e131a;
+}
+.crop-section {
+  margin-top: 12px;
+  border-top: 1px solid #344152;
+  padding-top: 10px;
+  color: #c5d1df;
+  font-size: 12px;
+}
+.crop-section summary { cursor: pointer; margin-bottom: 10px; }
+.crop-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.crop-record { display: flex; align-items: center; gap: 6px; margin: 7px 0; }
+.crop-record span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.crop-record button { padding: 4px 7px; min-height: 26px; font-size: 11px; }
+#crop-region-list, #crop-job-list { max-height: 180px; overflow-y: auto; }
+#crop-planning-overlay { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; z-index: 26; }
+
+body { grid-template-rows: auto minmax(0, 1fr); }
+.toolbar { flex-wrap: wrap; gap: 10px 18px; padding: 10px 18px; }
+.toolbar button, .toolbar-link { white-space: nowrap; flex-shrink: 0; }
+.slide-picker { white-space: nowrap; }
+.zoom-control { flex-wrap: wrap; min-width: 0; }
+@media (max-width: 600px) {
+  .toolbar { gap: 8px 12px; padding: 8px 12px; }
+  .crop-panel { max-height: 45%; }
+}
+@media (max-width: 880px) {
+  .slide-picker #slide-menu-button { flex: 1; min-width: 0; width: auto; }
+}
+
+.account-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}

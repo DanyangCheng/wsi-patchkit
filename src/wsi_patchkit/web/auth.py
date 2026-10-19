@@ -124,7 +124,7 @@ class SessionGuard:
         session = self.store.session(key)
         response = None
         if not public and session is None:
-            if path in {"/", "/crops", "/admin/users"}:
+            if path in {"/", "/personal", "/crops", "/admin/users"}:
                 response = RedirectResponse("/login", status_code=303)
             else:
                 response = JSONResponse({"detail": "authentication required"}, 401)

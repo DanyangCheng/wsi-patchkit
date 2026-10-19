@@ -4,13 +4,14 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>WSI PatchKit Viewer</title>
-    <link rel="stylesheet" href="/static/styles.css?v=14" />
+    <link rel="stylesheet" href="/static/styles.css?v=15" />
     <script
       src="https://cdn.jsdelivr.net/npm/openseadragon@5.0.1/build/openseadragon/openseadragon.min.js"
       defer
     ></script>
     <script src="/static/auth.js" defer></script>
-    <script src="/static/app.js?v=20" defer></script>
+    <script src="/static/app.js?v=21" defer></script>
+    <script src="/static/viewer-crops.js?v=1" defer></script>
   </head>
   <body>
     <header class="toolbar">
@@ -53,7 +54,7 @@
             aria-label="搜索切片"
           />
           <div id="slide-count" class="slide-count"></div>
-          <p class="slide-prediction-legend">● 蓝色：发现掩码图层</p>
+          <p class="slide-prediction-legend">● 蓝色：发现图层</p>
           <ul id="slide-list" aria-label="按文件夹分组的切片列表"></ul>
           <p id="slide-empty" class="slide-empty" hidden>没有匹配的切片</p>
         </div>
@@ -72,9 +73,9 @@
         />
         <button id="zoom-in" type="button" aria-label="放大">＋</button>
         <button id="home-view" type="button">全图</button>
-        <button id="overlay-tool" type="button" disabled>掩码图层</button>
-        <button id="crop-tool" type="button" aria-pressed="false">矩形裁剪</button>
-        <a class="toolbar-link" href="/crops">裁剪图管理</a>
+        <button id="overlay-tool" type="button" disabled>图层</button>
+        <button id="crop-tool" type="button" aria-pressed="false">裁剪任务</button>
+        <a class="toolbar-link" href="/personal">个人管理</a>
       </div>
 
       <div class="status-group">
@@ -94,18 +95,20 @@
         <span id="scale-label"></span>
         <i id="scale-bar"></i>
       </div>
-      <section id="overlay-panel" class="overlay-panel" aria-label="掩码图层" hidden>
+      <section id="overlay-panel" class="overlay-panel" aria-label="图层" hidden>
         <div class="overlay-panel-title" data-panel-drag-handle>
-          <strong>掩码图层</strong>
-          <button id="overlay-close" type="button" aria-label="关闭掩码图层">×</button>
+          <strong>图层</strong>
+          <button id="overlay-close" type="button" aria-label="关闭图层">×</button>
         </div>
         <div id="overlay-list" class="overlay-list"></div>
       </section>
-      <section id="crop-panel" class="crop-panel" aria-label="矩形裁剪" hidden>
+      <section id="crop-panel" class="crop-panel" aria-label="裁剪任务" hidden>
         <div class="crop-panel-title" data-panel-drag-handle>
-          <strong>矩形裁剪</strong>
+          <strong>裁剪任务</strong>
           <button id="crop-close" type="button" aria-label="关闭裁剪">×</button>
         </div>
+        <div class="crop-fields"><label>选区方式<select id="crop-selection-mode"><option value="rectangle">矩形：点击两个角</option><option value="polygon">多边形：逐点点击</option><option value="move">移动矩形</option></select></label><button id="crop-finish-polygon" type="button">完成多边形</button></div>
+        <p id="crop-selection-hint" class="crop-hint" role="status">在切片中点击两个角，选择裁剪区域。滚轮缩放，拖动平移。</p>
         <div class="crop-fields crop-coordinates">
           <label>x <input id="crop-x" type="number" min="0" step="1" /></label>
           <label>y <input id="crop-y" type="number" min="0" step="1" /></label>
@@ -132,7 +135,13 @@
             <input id="crop-filename" type="text" maxlength="200" placeholder="自动生成" />
           </label>
         </div>
+        <div class="crop-fields"><label>目标 MPP（0 为原生层级）<input id="crop-target-mpp" type="number" min="0" max="1000" step="any" value="0"></label></div>
         <button id="crop-save" class="primary" type="button">保存到服务器</button>
+        <button id="crop-save-region" type="button">保存选区</button>
+        <details class="crop-section"><summary>已保存选区</summary><div id="crop-region-list"></div></details>
+        <details class="crop-section" open><summary>批量图块</summary><div class="crop-fields"><label>图块宽<input id="crop-tile-width" type="number" min="1" step="1" value="256"></label><label>图块高<input id="crop-tile-height" type="number" min="1" step="1" value="256"></label><label>步长<input id="crop-stride" type="number" min="1" step="1" value="256"></label><label>最低组织占比<input id="crop-minimum-tissue" type="number" min="0" max="1" step="0.05" value="0"></label><label>边缘处理<select id="crop-edge"><option value="skip">跳过不完整图块</option><option value="clip">裁至选区边界</option></select></label></div><p class="crop-hint">组织占比按颜色估算；0 为不过滤。单次最多 512 块，多边形按图块中心筛选。</p><div class="crop-actions"><button id="crop-preview-grid" type="button">预览网格</button><button id="crop-submit-grid" class="primary" type="button" disabled>提交批量裁剪</button></div><p id="crop-grid-summary" class="crop-status" role="status"></p></details>
+        <details class="crop-section"><summary>参数模板</summary><div class="crop-fields"><label>模板<select id="crop-template-select"><option value="">选择模板</option></select></label><label>模板名称<input id="crop-template-name" maxlength="80"></label></div><div class="crop-actions"><button id="crop-save-template" type="button">保存模板</button><button id="crop-delete-template" type="button">删除模板</button></div></details>
+        <details class="crop-section" open><summary>当前切片任务</summary><div id="crop-job-list" aria-live="polite"></div></details>
         <p id="crop-status" class="crop-status" aria-live="polite"></p>
       </section>
       <div id="crop-overlay" class="crop-overlay" hidden>

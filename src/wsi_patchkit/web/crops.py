@@ -1,20 +1,51 @@
-"""Queued background jobs for server-side native-level crops."""
+"""Durable background crop records and native or physical-resolution outputs."""
 
 from __future__ import annotations
 
+import json
 import logging
+import math
 import queue
 import threading
+import time
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
 
 from ..tiles import ImageFormat, TileRenderer
+from ..types import SlideMetadata
+from .personal_store import PersonalStore
 from .registry import SlideSource
 
-CropJobStatus = Literal["queued", "running", "completed", "failed"]
+CropJobStatus = Literal["queued", "running", "completed", "failed", "cancelled"]
 _LOGGER = logging.getLogger(__name__)
+
+
+def crop_output(metadata: SlideMetadata, region, level: int, target_mpp):
+    """Map a native-level rectangle to a physical output grid."""
+    if target_mpp is None or (not isinstance(target_mpp, bool) and target_mpp == 0):
+        return None, region[2:], None
+    if (
+        isinstance(target_mpp, bool)
+        or not isinstance(target_mpp, (int, float))
+        or not math.isfinite(target_mpp)
+        or not 0.001 <= target_mpp <= 1000
+    ):
+        raise ValueError("target_mpp must be 0 or between 0.001 and 1000")
+    if metadata.mpp is None:
+        raise ValueError("切片 MPP 未知，无法按目标 MPP 裁剪，请选择原生层级输出")
+    x, y, width, height = region
+    dx, dy = metadata.levels[level].downsample
+    x0, y0 = round(x * dx), round(y * dy)
+    x1 = min(metadata.dimensions[0], round((x + width) * dx))
+    y1 = min(metadata.dimensions[1], round((y + height) * dy))
+    base_region = x0, y0, x1 - x0, y1 - y0
+    size = (
+        max(1, round((x1 - x0) * metadata.mpp[0] / target_mpp)),
+        max(1, round((y1 - y0) * metadata.mpp[1] / target_mpp)),
+    )
+    return float(target_mpp), size, base_region
 
 
 @dataclass(slots=True)
@@ -29,6 +60,8 @@ class _CropJob:
     namespace: str | None = None
     status: CropJobStatus = "queued"
     error: str | None = None
+    provenance: dict | None = None
+    target_mpp: float | None = None
 
     def public(self) -> dict[str, object]:
         x, y, width, height = self.region
@@ -43,6 +76,8 @@ class _CropJob:
         }
         if self.error is not None:
             result["error"] = self.error
+        if self.target_mpp is not None:
+            result["target_mpp"] = self.target_mpp
         return result
 
 
@@ -55,16 +90,29 @@ class CropJobQueue:
         output_dir: str | Path,
         *,
         worker_count: int = 1,
+        store: PersonalStore | None = None,
     ) -> None:
         if worker_count < 1:
             raise ValueError("crop worker count must be positive")
         self._renderer = renderer
+        self._store = store
         self._output_dir = Path(output_dir)
         self._queue: queue.Queue[_CropJob | None] = queue.Queue()
         self._jobs: dict[str, _CropJob] = {}
         self._reserved_filenames: set[tuple[str | None, str]] = set()
         self._lock = threading.Lock()
         self._closed = False
+        if store is not None:
+            # Interrupted work stays visible and can be explicitly retried.
+            with store.lock:
+                rows = store.db.execute(
+                    "SELECT owner, key, data FROM personal_records WHERE kind='job'"
+                ).fetchall()
+            for owner, key, encoded in rows:
+                record = json.loads(encoded)
+                if record["status"] in {"queued", "running"}:
+                    record.update(status="failed", error="服务重启中断了任务，请重试")
+                    store.put(owner, "job", key, record)
         self._threads = tuple(
             threading.Thread(
                 target=self._worker,
@@ -90,6 +138,8 @@ class CropJobQueue:
         image_format: ImageFormat,
         filename: str,
         namespace: str | None = None,
+        provenance: dict | None = None,
+        target_mpp: float | None = None,
     ) -> dict[str, object]:
         job = _CropJob(
             uuid.uuid4().hex,
@@ -100,6 +150,8 @@ class CropJobQueue:
             image_format,
             filename,
             namespace=namespace,
+            provenance=provenance,
+            target_mpp=target_mpp,
         )
         with self._lock:
             if self._closed:
@@ -110,6 +162,7 @@ class CropJobQueue:
                 raise FileExistsError(filename)
             self._jobs[job.job_id] = job
             self._reserved_filenames.add((namespace, filename))
+            self._record(job)
             self._queue.put(job)
             return job.public()
 
@@ -119,8 +172,55 @@ class CropJobQueue:
         with self._lock:
             job = self._jobs.get(job_id)
             if job is None or job.slide_id != slide_id or job.namespace != namespace:
+                if self._store:
+                    record = self._store.get(namespace or "local", "job", job_id)
+                    if record and record["slide_id"] == slide_id:
+                        return record
                 raise KeyError(job_id)
             return job.public()
+
+    def _record(self, job: _CropJob) -> None:
+        if self._store:
+            owner = job.namespace or "local"
+            previous = self._store.get(owner, "job", job.job_id) or {}
+            self._store.put(
+                owner,
+                "job",
+                job.job_id,
+                {
+                    **job.public(),
+                    **(job.provenance or {}),
+                    "created_at": previous.get("created_at", time.time()),
+                    "updated_at": time.time(),
+                },
+            )
+
+    def list(self, namespace: str | None = None) -> list[dict]:
+        if self._store:
+            return self._store.list(namespace or "local", "job")
+        with self._lock:
+            return [j.public() for j in self._jobs.values() if j.namespace == namespace]
+
+    def provenance_for(self, filenames: list[str], namespace: str | None = None):
+        latest = {}
+        for job in self.list(namespace):
+            if job["status"] == "completed":
+                latest.setdefault(job["filename"], job)
+        return [
+            latest.get(name) or {"filename": name, "provenance": "unknown_legacy_file"}
+            for name in filenames
+        ]
+
+    def cancel(self, job_id: str, namespace: str | None = None) -> None:
+        with self._lock:
+            job = self._jobs.get(job_id)
+            if job is None or job.namespace != namespace:
+                raise KeyError(job_id)
+            if job.status != "queued":
+                raise RuntimeError("only queued jobs can be cancelled")
+            job.status = "cancelled"
+            self._reserved_filenames.discard((namespace, job.filename))
+            self._record(job)
 
     def delete_saved_crops(
         self, filenames: list[str], *, namespace: str | None = None
@@ -144,7 +244,10 @@ class CropJobQueue:
             if job is None:
                 return
             with self._lock:
+                if job.status == "cancelled":
+                    continue
                 job.status = "running"
+                self._record(job)
             try:
                 self._save(job)
             except FileExistsError:
@@ -174,13 +277,28 @@ class CropJobQueue:
         return directory
 
     def _save(self, job: _CropJob) -> None:
-        encoded = self._renderer.render_level_region(
-            job.source.path,
-            job.region,
-            job.level,
-            image_format=job.image_format,
-            source_mpp=job.source.source_mpp,
-        )
+        if job.target_mpp is None:
+            encoded = self._renderer.render_level_region(
+                job.source.path,
+                job.region,
+                job.level,
+                image_format=job.image_format,
+                source_mpp=job.source.source_mpp,
+            )
+        else:
+            metadata = self._renderer.metadata(
+                job.source.path, source_mpp=job.source.source_mpp
+            )
+            _, size, base_region = crop_output(
+                metadata, job.region, job.level, job.target_mpp
+            )
+            encoded = self._renderer.render_region(
+                job.source.path,
+                base_region,
+                size,
+                image_format=job.image_format,
+                source_mpp=job.source.source_mpp,
+            )
         directory = self._directory(job.namespace)
         directory.mkdir(parents=True, exist_ok=True)
         destination = directory / job.filename
@@ -197,6 +315,7 @@ class CropJobQueue:
             job.status = status
             job.error = error
             self._reserved_filenames.discard((job.namespace, job.filename))
+            self._record(job)
 
     def close(self) -> None:
         with self._lock:

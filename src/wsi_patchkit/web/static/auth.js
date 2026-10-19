@@ -8,6 +8,7 @@
       if (!response.ok) throw new Error("无法获取登录状态");
       return response.json();
     });
+  window.patchkitSession = session;
   window.fetch = async (input, init = {}) => {
     const state = await session;
     const request = new Request(input, init);
@@ -23,12 +24,14 @@
   };
   session.then((state) => {
     if (!state.enabled) return;
+    const header = document.querySelector("header");
+    const headerActions = header?.querySelector("[data-header-actions]") || header;
     if (state.user?.is_admin && location.pathname !== "/admin/users") {
       const link = document.createElement("a");
       link.href = "/admin/users";
-      link.textContent = "账号管理";
+      link.textContent = "用户与授权";
       link.className = "toolbar-link";
-      document.querySelector("header")?.append(link);
+      headerActions?.append(link);
     }
     const button = document.createElement("button");
     button.type = "button";
@@ -42,7 +45,15 @@
         location.replace("/login");
       } catch (_) { button.disabled = false; alert("退出失败，请重试。"); }
     });
-    document.querySelector("header")?.append(button);
+    const personalLink = header?.querySelector('a[href="/personal"]:not(.brand)');
+    if (personalLink) {
+      const actions = document.createElement("div");
+      actions.className = "account-actions";
+      actions.append(personalLink, button);
+      header.append(actions);
+    } else {
+      headerActions?.append(button);
+    }
   }).catch((error) => console.warn(error));
   // Revalidate sessions on history restoration and while the viewer is idle.
   // This also redirects after a server restart without waiting for an API call.

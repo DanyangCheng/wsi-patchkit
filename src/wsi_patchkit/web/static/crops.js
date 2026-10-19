@@ -165,7 +165,7 @@
 
     if (!crops.length) {
       emptyTitle.textContent = "还没有裁剪图";
-      emptyDescription.textContent = "返回切片查看器，使用“矩形裁剪”保存第一张图像。";
+      emptyDescription.textContent = "在切片查看器中打开“裁剪任务”，保存第一张图像。";
       emptyViewerLink.hidden = false;
     } else if (!visibleCrops.length) {
       emptyTitle.textContent = "没有匹配的图像";
@@ -206,22 +206,28 @@
     }
   }
 
-  function downloadCrops(filenames) {
+  async function downloadCrops(filenames) {
     if (!filenames.length) return;
-    const form = document.createElement("form");
-    form.method = "post";
-    form.action = "/api/crops/batch-download";
-    form.target = "_blank";
-    form.hidden = true;
-    const input = document.createElement("input");
-    input.type = "hidden";
-    input.name = "filenames";
-    input.value = JSON.stringify(filenames);
-    form.append(input);
-    document.body.append(form);
-    form.submit();
-    form.remove();
+    downloadSelectedButton.disabled = true;
     setStatus(`正在打包下载 ${filenames.length} 张裁剪图…`);
+    try {
+      const response = await fetch("/api/crops/batch-download", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ filenames, include_manifest: true }),
+      });
+      if (!response.ok) {
+        const result = await response.json();
+        throw new Error(result.detail || `HTTP ${response.status}`);
+      }
+      const url = URL.createObjectURL(await response.blob());
+      const link = document.createElement("a");
+      link.href = url; link.download = "wsi-patchkit-crops.zip";
+      document.body.append(link); link.click(); link.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 30000);
+      setStatus(`已打包 ${filenames.length} 张裁剪图和坐标清单`);
+    } catch (error) {
+      setStatus(`下载失败：${error.message}`, "error");
+    } finally { updateSelectionControls(); }
   }
 
   async function loadCrops() {

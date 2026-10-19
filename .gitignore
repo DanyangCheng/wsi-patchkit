@@ -20,3 +20,5 @@ jpg/
 results/
 slides/
 .cache/
+.kfb-index/
+.workbench/

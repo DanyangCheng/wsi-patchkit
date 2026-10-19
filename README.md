@@ -120,12 +120,12 @@ The synchronous reader is borrowed and remains caller-owned on success or error.
 
 RGB sampling supports:
 
-| Kernel | Sampling rule |
-| --- | --- |
-| nearest | Center index `floor(s + 0.5)` |
-| bilinear | Two neighbors per axis, float64 separable weights |
-| bicubic | Four neighbors per axis, Keys cubic with `a=-0.5`, no added antialias filter |
-| area | Physical footprint overlap weights; both target MPP axes must be at least the selected native MPP |
+| Kernel   | Sampling rule                                                                                     |
+| -------- | ------------------------------------------------------------------------------------------------- |
+| nearest  | Center index `floor(s + 0.5)`                                                                   |
+| bilinear | Two neighbors per axis, float64 separable weights                                                 |
+| bicubic  | Four neighbors per axis, Keys cubic with `a=-0.5`, no added antialias filter                    |
+| area     | Physical footprint overlap weights; both target MPP axes must be at least the selected native MPP |
 
 Each kernel accepts `padding_mode="constant"` or `"reflect"`. Reflect maps
 each native kernel neighbor on the entire original axis, with NumPy's
@@ -236,6 +236,21 @@ and an MPP-aware scale bar. TIFF files use the bundled tifffile reader, `.kfb`
 files use `kfbslide`, ordinary images use Pillow, and other WSI formats use
 OpenSlide.
 
+### Personal workspace
+
+Open **个人管理** in the viewer toolbar, or visit `/personal`. The workspace
+includes a dashboard, slide library, resumable upload queue, crop tasks, result
+library, recycle bin, and account settings. See the
+[personal workspace guide](docs/PERSONAL_WORKSPACE.md) for the full workflow.
+
+Each account can organize its accessible slides with private projects, tags and
+notes. Open **裁剪任务** in the slide viewer to select rectangle or polygon ROIs
+on the slide, preview patch grids, and reuse crop templates. The personal result
+library exports images with coordinate and resolution metadata. Crop in native-level
+pixels or set a target MPP when the slide's physical resolution is known.
+Account settings allow profile updates, password changes and signing out all
+devices. Password changes require the current password and revoke every session.
+
 ### Ordinary images
 
 `AutoSlideReader` also reads JPEG, PNG, BMP, and WebP. They expose a single
@@ -323,19 +338,18 @@ docker run --rm -p 8000:8000 \
   wsi-patchkit
 ```
 
-Select **矩形裁剪** to place a rectangle on the slide, enter its exact level-0
-`x`, `y`, width, and height, choose a pyramid level, and save a PNG or JPEG on
-the server. Coordinates and dimensions are pixels at the selected level; crops
-are read directly from that level without rescaling, at its native resolution.
-The server stores them in
-`--crop-output-dir` (the default is `./crops`) and never overwrites an existing
-file. The viewer remembers the most recently entered crop width and height when
-switching slides or reloading the page. Saving submits work to a background
-queue, so another crop can be positioned and submitted while earlier jobs are
-still running. One crop worker is used by default; use `--crop-workers N` to
-change the background concurrency. Open **裁剪图管理** in the viewer toolbar to
-preview and search saved crop images, download selected images as a ZIP, or delete
-one or more selections.
+Select **裁剪任务** in the viewer to choose a rectangle or polygon directly on
+the slide. Coordinates and dimensions use pixels at the selected native level.
+Choose an output format and optional target MPP, save named regions and parameter
+templates, and preview patch grids on the slide before submitting background jobs.
+Without a target MPP, crops retain the selected level's native resolution.
+The viewer remembers the most recently entered crop width and height when
+switching slides or reloading the page. The server stores images in
+`--crop-output-dir` (default `./crops`) and never overwrites an existing file.
+One crop worker is used by default; use `--crop-workers N` to change concurrency.
+The viewer panel displays current-slide tasks and supports cancelling queued jobs
+and retrying failures. Open **个人管理 → 裁剪管理** to browse saved crops, download
+images and coordinate metadata, or delete selections.
 
 Applications can embed the viewer server instead of using the CLI:
 

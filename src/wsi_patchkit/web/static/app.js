@@ -46,6 +46,8 @@
   let openSequence = 0;
   let slideRequestController = null;
   const expandedFolders = new Set();
+  const cropListeners = new Set();
+  function notifyCropChange() { for (const listener of cropListeners) listener(); }
   let cropActive = false;
   let cropOverlayAdded = false;
   let overlayItems = new Map();
@@ -618,7 +620,7 @@
         updateCropQueueStatus();
         return;
       }
-      if (result.status === "failed") {
+      if (["failed", "cancelled"].includes(result.status)) {
         pendingCropJobs.delete(jobId);
         latestCropResult = {
           message: `${result.filename} 保存失败：${result.error || "未知错误"}`,
@@ -657,6 +659,30 @@
       viewer.addOverlay({ element: cropOverlay, location: viewportRect });
       cropOverlayAdded = true;
     }
+  }
+
+  let linkedRegionApplied = false;
+  function applyLinkedRegion() {
+    const params = new URLSearchParams(location.search);
+    const requestedSlide = params.get("slide");
+    if (linkedRegionApplied || (requestedSlide && requestedSlide !== currentSlide?.id)) return;
+    linkedRegionApplied = true;
+    if (params.get("crop") === "1") setCropActive(true);
+    const keys = ["x", "y", "width", "height", "level"];
+    if (!keys.every(key => params.has(key))) return;
+    const values = Object.fromEntries(keys.map(key => [key, Number(params.get(key))]));
+    if (!Object.values(values).every(Number.isSafeInteger)) return;
+    const level = currentSlide.levels?.find(level => level.level === values.level);
+    if (!level || values.x < 0 || values.y < 0 || values.width < 1 || values.height < 1 ||
+        values.x + values.width > level.width || values.y + values.height > level.height) return;
+    cropLevel.value = String(values.level);
+    setCropActive(true);
+    setCropRegion(values);
+    const item = currentItem();
+    viewer.viewport.fitBounds(item.imageToViewportRectangle(new OpenSeadragon.Rect(
+      values.x * level.downsample[0], values.y * level.downsample[1],
+      values.width * level.downsample[0], values.height * level.downsample[1],
+    )), true);
   }
 
   function selectedCropLevel() {
@@ -722,6 +748,7 @@
       cropHeight.max = String(level.height);
     }
     updateCropOverlay();
+    notifyCropChange();
   }
 
   function centerCropAt(imagePoint) {
@@ -761,6 +788,7 @@
       cropOverlayAdded = false;
       cropOverlay.hidden = true;
     }
+    notifyCropChange();
   }
 
   function syncCropInputs() {
@@ -784,6 +812,7 @@
 
   async function saveCrop() {
     if (!currentSlide || !cropActive) return;
+    if (window.patchkitCrop?.incomplete) { setCropStatus("请先完成选区", "error"); return; }
     setCropStatus(`正在提交 Level ${cropLevel.value || 0} 裁剪任务…`);
     try {
       const slideId = currentSlide.id;
@@ -796,6 +825,7 @@
             ...cropRegion,
             level: Number(cropLevel.value),
             format: cropFormat.value,
+            target_mpp: Number(document.querySelector("#crop-target-mpp")?.value || 0),
             filename: cropFilename.value.trim() || null,
           }),
         },
@@ -834,6 +864,7 @@
       overlayItems = new Map();
     }
     currentSlide = null;
+    notifyCropChange();
     currentSlideLabel.textContent = record.path || slideId;
     for (const item of slideList.querySelectorAll("button")) {
       const selected = item.dataset.slideId === slideId;
@@ -884,7 +915,9 @@
       currentSlide = metadata;
       populateCropLevels();
       populateOverlayControls();
+      notifyCropChange();
       viewer.open(info);
+      fetch(`/api/personal/slides/${id}/view`, { method: "POST" }).catch(() => {});
     } catch (error) {
       if (error.name !== "AbortError" && sequence === openSequence) {
         showStatus(`切片加载失败：${error.message}`);
@@ -1140,6 +1173,32 @@
       },
     });
 
+    window.patchkitCrop = {
+      viewer, drawing: false, incomplete: false,
+      selection() { return {slide: currentSlide, active: cropActive, level: Number(cropLevel.value), ...cropRegion}; },
+      subscribe(listener) { cropListeners.add(listener); return () => cropListeners.delete(listener); },
+      status: setCropStatus,
+      select(region, fit = false) {
+        const level = currentSlide?.levels.find(l => l.level === region.level);
+        if (!level) throw new Error("所选层级不存在");
+        cropLevel.value = String(region.level); updateCropLevelMpp();
+        if (!cropActive) setCropActive(true);
+        setCropRegion(region);
+        if (fit && currentItem()) viewer.viewport.fitBounds(currentItem().imageToViewportRectangle(new OpenSeadragon.Rect(
+          cropRegion.x*level.downsample[0], cropRegion.y*level.downsample[1],
+          cropRegion.width*level.downsample[0], cropRegion.height*level.downsample[1],
+        )), true);
+      },
+      imagePoint(position) {
+        const item = currentItem();
+        return item ? item.viewportToImageCoordinates(viewer.viewport.pointFromPixel(position)) : null;
+      },
+      screenPoint(x, y, levelIndex) {
+        const level = currentSlide?.levels.find(l => l.level === levelIndex), item = currentItem();
+        return item && level ? item.imageToViewerElementCoordinates(new OpenSeadragon.Point(x*level.downsample[0], y*level.downsample[1])) : null;
+      },
+    };
+
     viewer.addHandler("viewport-change", () => {
       // Rebuild the pending queue for the current view instead of fetching
       // tiles queued along an earlier pan/zoom path. Active jobs stay bounded.
@@ -1161,6 +1220,7 @@
       updateViewportStatus();
       loadInitiallyVisibleOverlays();
       if (cropActive) initializeCropRegion();
+      applyLinkedRegion();
     });
     viewer.addHandler("open-failed", (event) => {
       showStatus(`切片加载失败：${event.message || "未知错误"}`);
@@ -1203,7 +1263,7 @@
       coordinateLabel.textContent = "x — · y —";
     });
     viewer.addHandler("canvas-click", (event) => {
-      if (!cropActive || !event.quick || !event.position) return;
+      if (!cropActive || window.patchkitCrop?.drawing || !event.quick || !event.position) return;
       const item = currentItem();
       if (!item) return;
       const viewportPoint = viewer.viewport.pointFromPixel(event.position);
@@ -1296,7 +1356,10 @@
       const records = await response.json();
       slides = new Map(records.map((record) => [record.id, record]));
       populateSlideMenu(records);
-      if (records.length) openSlide(records[0].id);
+      const requested = new URLSearchParams(location.search).get("slide");
+      if (requested && slides.has(requested)) openSlide(requested);
+      else if (requested) showStatus("目标切片不存在或没有访问权限，请选择其他切片");
+      else if (records.length) openSlide(records[0].id);
       else showStatus("切片列表为空");
       window.setInterval(refreshSlides, 5000);
     } catch (error) {
