@@ -184,7 +184,10 @@ def test_sqlite_backend_matches_native_pixels_and_repairs(
         cached.close()
 
 
-def test_reader_evicts_old_slides_and_reopens_replaced_source(tmp_path, monkeypatch):
+@pytest.mark.parametrize("persistent", [False, True])
+def test_reader_evicts_old_slides_and_reopens_replaced_source(
+    tmp_path, monkeypatch, persistent
+):
     pytest.importorskip("kfbslide")
     import kfbslide._slide as backend
 
@@ -193,13 +196,19 @@ def test_reader_evicts_old_slides_and_reopens_replaced_source(tmp_path, monkeypa
     paths = [tmp_path / f"{i}.kfb" for i in range(2)]
     infos = {str(path): _index_file(path) for path in paths}
     monkeypatch.setattr(backend, "parse_kfb_file", lambda path: infos[path])
-    reader = KfbSlideReader(cache_size=1, index_cache_dir=tmp_path / "cache")
+    reader = KfbSlideReader(
+        cache_size=1,
+        index_cache_dir=tmp_path / "cache" if persistent else None,
+    )
     try:
         reader.metadata(paths[0])
         previous = next(iter(reader._slides.values()))
+        handle = previous._ensure_open_handle()
         reader.metadata(paths[1])
         assert previous._closed
-        assert previous._index._closed
+        assert handle.closed
+        if persistent:
+            assert previous._index._closed
         assert len(reader._slides) == 1
         original = next(iter(reader._slides.values()))
         stat = paths[1].stat()
@@ -209,3 +218,45 @@ def test_reader_evicts_old_slides_and_reopens_replaced_source(tmp_path, monkeypa
         assert next(iter(reader._slides.values())) is not original
     finally:
         reader.close()
+
+
+@pytest.mark.parametrize("persistent", [False, True])
+@pytest.mark.parametrize("tile_cache_size", [0, 2])
+def test_reader_respects_tile_cache_budget(
+    tmp_path, monkeypatch, persistent, tile_cache_size
+):
+    pytest.importorskip("kfbslide")
+    import kfbslide._slide as backend
+
+    from wsi_patchkit.io.kfbslide import KfbSlideReader
+
+    path = tmp_path / "slide.kfb"
+    info = _index_file(path)
+    monkeypatch.setattr(backend, "parse_kfb_file", lambda _: info)
+    with KfbSlideReader(
+        index_cache_dir=tmp_path / "cache" if persistent else None,
+        tile_cache_size=tile_cache_size,
+    ) as reader:
+        reader.read_region(path, (0, 0), 0, (768, 256))
+        cache = next(iter(reader._slides.values()))._tile_cache
+        assert len(cache._cache) == tile_cache_size
+
+
+def test_persistent_reader_preserves_initialization_error(tmp_path, monkeypatch):
+    pytest.importorskip("kfbslide")
+    import kfbslide._slide as backend
+
+    from wsi_patchkit.io.kfbslide import KfbSlideReader
+
+    path = tmp_path / "slide.kfb"
+    path.touch()
+
+    def fail_parse(_):
+        raise ValueError("invalid KFB header")
+
+    monkeypatch.setattr(backend, "parse_kfb_file", fail_parse)
+    with (
+        KfbSlideReader(index_cache_dir=tmp_path / "cache") as reader,
+        pytest.raises(ValueError, match="invalid KFB header"),
+    ):
+        reader.metadata(path)

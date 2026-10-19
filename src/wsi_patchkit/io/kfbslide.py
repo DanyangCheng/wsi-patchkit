@@ -7,6 +7,7 @@ import math
 import os
 import sqlite3
 import struct
+import threading
 import time
 from importlib import import_module
 from pathlib import Path
@@ -92,7 +93,7 @@ class KfbSlideReader(OpenSlideReader):
             def __init__(self, filename):
                 if cache_dir is None:
                     super().__init__(filename)
-                    self._tile_cache.capacity = tile_cache_size
+                    self._configure_tile_cache()
                     return
                 # Initialize the pinned backend without calling _TileIndex,
                 # which would materialize every record before our replacement.
@@ -100,11 +101,18 @@ class KfbSlideReader(OpenSlideReader):
                 self._closed = False
                 self._file_handle = None
                 self._pid = os.getpid()
+                # Some builds retain the old version string but use the
+                # newer per-thread handle registry. Detect the actual layout.
+                if hasattr(backend.OpenSlide, "_handles"):
+                    self._handles = threading.local()
+                    self._open_handles = []
+                    self._handles_lock = threading.Lock()
                 self._tile_cache = private._LRUCache(tile_cache_size)
                 try:
                     self._info = private.parse_kfb_file(filename)
+                    self._configure_tile_cache()
                     self._index = SQLiteTileIndex(filename, self._info, cache_dir)
-                    self._file_handle = open(filename, "rb")  # noqa: SIM115
+                    self._ensure_open_handle()
                     header = self._info.header
                     props = {
                         "openslide.vendor": "kfbio",
@@ -141,6 +149,16 @@ class KfbSlideReader(OpenSlideReader):
                             "unable to access persistent KFB index"
                         ) from error
                     raise
+
+            def _configure_tile_cache(self):
+                if hasattr(self._tile_cache, "max_bytes"):
+                    # Public configuration remains a tile count; decoded
+                    # tiles in this backend are RGBA.
+                    self._tile_cache.max_bytes = (
+                        tile_cache_size * self._info.header.tile_size**2 * 4
+                    )
+                else:
+                    self._tile_cache.capacity = tile_cache_size
 
             def read_region(self, location, level, size):
                 index = self._index
