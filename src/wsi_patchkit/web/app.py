@@ -36,7 +36,8 @@ except ImportError as error:  # pragma: no cover - exercised without the web ext
 from ..io import AutoSlideReader, SlideReader
 from ..io.image import IMAGE_EXTENSIONS
 from ..tiles import TileRenderer, iiif_scale_factors
-from ..types import MPP, SlideMetadata, as_mpp
+from ..types import SlideMetadata, as_mpp
+from .auth import AdminAuth, install_auth
 from .crops import CropJobQueue
 from .detections import DetectionOverlay, bounds
 from .overlays import RGBA, IndexedOverlay, OverlayRegistry, OverlayRenderer
@@ -46,6 +47,9 @@ from .workers import TileWorkerPool
 _STATIC_DIR = Path(__file__).with_name("static")
 _LOGGER = logging.getLogger(__name__)
 _STATIC_ASSETS = {
+    "auth.js": (_STATIC_DIR / "auth.js").read_bytes(),
+    "login.js": (_STATIC_DIR / "login.js").read_bytes(),
+    "login.css": (_STATIC_DIR / "login.css").read_bytes(),
     "app.js": (_STATIC_DIR / "app.js").read_bytes(),
     "styles.css": (_STATIC_DIR / "styles.css").read_bytes(),
     "crops.js": (_STATIC_DIR / "crops.js").read_bytes(),
@@ -261,6 +265,7 @@ def create_app(
     slide_scanner: SlideDirectoryScanner | None = None,
     upload_dir: str | Path = "uploads",
     max_upload_bytes: int = 32 * 1024**3,
+    auth: AdminAuth | None = None,
 ) -> FastAPI:
     """Create a self-contained WSI viewer for an explicit slide registry."""
     if tile_size < 1:
@@ -359,6 +364,7 @@ def create_app(
         renderer.close()
 
     app = FastAPI(title="wsi-patchkit viewer", lifespan=lifespan)
+    install_auth(app, auth)
     app.state.slide_registry = registry
     app.state.overlay_registry = overlay_registry
     app.state.overlay_renderer = overlay_renderer

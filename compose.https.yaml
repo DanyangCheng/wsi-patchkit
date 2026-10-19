@@ -1,0 +1,43 @@
+# Use with: docker compose -f compose.yaml -f compose.https.yaml up -d --build
+# Requires Docker Compose >= 2.24.4 (!reset support).
+services:
+  viewer:
+    ports: !reset []
+    environment:
+      PATCHKIT_COOKIE_SECURE: "true"
+      FORWARDED_ALLOW_IPS: "172.30.87.2"
+    networks:
+      proxy:
+        ipv4_address: 172.30.87.3
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    environment:
+      PATCHKIT_DOMAIN: ${PATCHKIT_DOMAIN:?Set PATCHKIT_DOMAIN to your public domain}
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    networks:
+      proxy:
+        ipv4_address: 172.30.87.2
+    depends_on:
+      viewer:
+        condition: service_healthy
+    security_opt:
+      - no-new-privileges:true
+
+networks:
+  proxy:
+    ipam:
+      config:
+        - subnet: 172.30.87.0/24
+
+volumes:
+  caddy-data:
+  caddy-config:

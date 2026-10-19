@@ -1,4 +1,6 @@
 .git
+.env
+.secrets
 .github
 .venv
 .pytest_cache

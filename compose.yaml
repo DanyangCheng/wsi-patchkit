@@ -8,7 +8,14 @@ services:
     init: true
     restart: unless-stopped
     ports:
-      - "${PATCHKIT_PORT:-8081}:8000"
+      - "127.0.0.1:${PATCHKIT_PORT:-8081}:8000"
+    environment:
+      PATCHKIT_ADMIN_USER: ${PATCHKIT_ADMIN_USER:-admin}
+      PATCHKIT_ADMIN_PASSWORD_HASH_FILE: /run/secrets/admin_password_hash
+      PATCHKIT_COOKIE_SECURE: ${PATCHKIT_COOKIE_SECURE:-false}
+      PATCHKIT_SESSION_SECONDS: ${PATCHKIT_SESSION_SECONDS:-28800}
+    secrets:
+      - admin_password_hash
     volumes:
       - type: bind
         source: ${WSI_SLIDES_DIR:-./data/slides}
@@ -19,11 +26,11 @@ services:
         target: /data/overlays
         read_only: true
       - type: bind
-        source: ${WSI_SLIDES_DIR:-./data/crops}
+        source: ${WSI_CROPS_DIR:-./data/crops}
         target: /data/crops
         read_only: false
       - type: bind
-        source: ${WSI_SLIDES_DIR:-./data/uploads}
+        source: ${WSI_UPLOADS_DIR:-./data/uploads}
         target: /data/uploads
         read_only: false
       - index-cache:/data/cache
@@ -58,3 +65,7 @@ volumes:
   crops:
   uploads:
   index-cache:
+
+secrets:
+  admin_password_hash:
+    file: ./.secrets/admin-password.hash

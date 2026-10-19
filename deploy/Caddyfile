@@ -1,0 +1,4 @@
+{$PATCHKIT_DOMAIN} {
+	header Strict-Transport-Security "max-age=31536000"
+	reverse_proxy viewer:8000
+}

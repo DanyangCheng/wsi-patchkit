@@ -184,6 +184,11 @@ Install the optional web dependencies:
 uv sync --extra web
 ```
 
+The CLI requires administrator credentials and serves HTTP by default. See
+[administrator login and HTTPS deployment](docs/SECURITY_DEPLOYMENT.md) to generate
+the password hash, configure cookies, and deploy Caddy. For local development
+without authentication, explicitly add `--no-auth` to the commands below.
+
 Start the viewer by explicitly registering one or more public slide IDs:
 
 ```bash
@@ -271,18 +276,18 @@ control commands.
 
 ### Docker Compose
 
-Create the slide directory, then build and start the viewer. WSI files can be
-added before or after startup:
+Generate the administrator password hash and configure `.env` first using the
+[HTTPS deployment guide](docs/SECURITY_DEPLOYMENT.md). Then start the viewer:
 
 ```bash
-mkdir -p data/slides data/overlays
-docker compose up --build -d
+docker compose -f compose.yaml -f compose.https.yaml up --build -d
 ```
 
-Open [http://127.0.0.1:8000](http://127.0.0.1:8000). Compose mounts slides and overlays read-only and
-stores crops and browser uploads in persistent volumes. Stop the
-service with `docker compose down`; add `--volumes` only when you also want to
-delete saved crops and uploaded slides.
+Open your configured HTTPS domain and log in. Compose mounts slides and overlays
+read-only and stores crops and browser uploads in bind-mounted directories.
+Use the same `-f` options when stopping the service. The base Compose file alone
+binds to loopback port 8081 for local testing; HTTP requires the cookie setting
+described in the deployment guide.
 
 The slide directory is rescanned when the browser polls the slide list (every
 5 seconds). New files appear after two scans with unchanged size and modification

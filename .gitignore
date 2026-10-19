@@ -1,4 +1,6 @@
 .venv/
+.env
+.secrets/
 dist/
 build/
 *.egg-info/

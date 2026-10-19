@@ -10,8 +10,17 @@ Open an elevated PowerShell in the project directory and install the service:
 uv sync --extra web
 Set-ExecutionPolicy -Scope Process Bypass -Force
 .\deploy\windows\install-service.ps1
+.venv\Scripts\python.exe -m wsi_patchkit.web.auth | Set-Content -Encoding ascii "$env:ProgramData\wsi-patchkit-viewer\admin-password.hash"
 Start-Service wsiPatchkitViewer
 ```
+
+The hash command prompts for and confirms the administrator password (12 or
+more characters). The login name is `admin`. The service account must be able
+to read the hash file; restrict file access to that account and administrators.
+The template uses non-Secure cookies for loopback HTTP. When adding an HTTPS
+proxy, set `PATCHKIT_COOKIE_SECURE` to `true` in the installed XML and configure
+only the proxy's address in `FORWARDED_ALLOW_IPS`. See the
+[authentication and HTTPS guide](SECURITY_DEPLOYMENT.md).
 
 The installer registers an automatic, delayed-start service and prompts for a
 Windows account and password. Use an account that can read the slide directory

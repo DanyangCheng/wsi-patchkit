@@ -5,6 +5,8 @@
   <executable>@VIEWER_EXE@</executable>
   <arguments>-m wsi_patchkit.web --slide-dir "@SLIDE_DIR@" --host 127.0.0.1 --port 8000 --reader-pool-size 4 --reader-cache-size 1 --kfb-index-cache-dir "%BASE%\cache\kfb-index" --crop-output-dir "%BASE%\data\crops" --upload-dir "%BASE%\data\uploads"</arguments>
   <workingdirectory>@PROJECT_DIR@</workingdirectory>
+  <env name="PATCHKIT_ADMIN_PASSWORD_HASH_FILE" value="%BASE%\admin-password.hash" />
+  <env name="PATCHKIT_COOKIE_SECURE" value="false" />
   <startmode>Automatic</startmode>
   <delayedAutoStart>true</delayedAutoStart>
   <onfailure action="restart" delay="10 sec" />

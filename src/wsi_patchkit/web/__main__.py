@@ -259,6 +259,13 @@ def main() -> None:
     )
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", default=8000, type=int)
+    parser.add_argument("--ssl-certfile", type=Path, help="PEM TLS certificate chain")
+    parser.add_argument("--ssl-keyfile", type=Path, help="PEM TLS private key")
+    parser.add_argument(
+        "--no-auth",
+        action="store_true",
+        help="Disable authentication for local development only",
+    )
     parser.add_argument(
         "--source-mpp",
         type=_source_mpp,
@@ -351,6 +358,11 @@ def main() -> None:
         help="number of background crop workers (default: 1)",
     )
     args = parser.parse_args()
+    if bool(args.ssl_certfile) != bool(args.ssl_keyfile):
+        parser.error("--ssl-certfile and --ssl-keyfile must be provided together")
+    for tls_file in (args.ssl_certfile, args.ssl_keyfile):
+        if tls_file is not None and not tls_file.is_file():
+            parser.error(f"TLS file does not exist: {tls_file}")
     if not math.isfinite(args.debug_stack_interval) or args.debug_stack_interval < 0:
         parser.error("--debug-stack-interval must be finite and non-negative")
     if args.max_upload_gb < 1:
@@ -368,7 +380,13 @@ def main() -> None:
         raise SystemExit("Install the viewer with: uv sync --extra web") from error
 
     from .app import create_app
+    from .auth import AdminAuth
     from .overlays import load_overlay_manifest
+
+    try:
+        auth = None if args.no_auth else AdminAuth.from_env()
+    except (ValueError, OSError) as error:
+        parser.error(str(error))
 
     if args.debug_render:
         render_logger = logging.getLogger("wsi_patchkit")
@@ -430,6 +448,7 @@ def main() -> None:
 
     app = create_app(
         slides,
+        auth=auth,
         source_mpp=args.source_mpp,
         overlays=overlays,
         manifest_slide_id_aliases=manifest_slide_id_aliases,
@@ -450,7 +469,16 @@ def main() -> None:
             args.debug_stack_interval, repeat=True, file=sys.stderr
         )
     try:
-        uvicorn.run(app, host=args.host, port=args.port)
+        # Uvicorn trusts loopback by default. HTTPS Compose explicitly supplies
+        # only the dedicated proxy address via FORWARDED_ALLOW_IPS.
+        uvicorn.run(
+            app,
+            host=args.host,
+            port=args.port,
+            proxy_headers=True,
+            ssl_certfile=str(args.ssl_certfile) if args.ssl_certfile else None,
+            ssl_keyfile=str(args.ssl_keyfile) if args.ssl_keyfile else None,
+        )
     finally:
         if args.debug_stack_interval:
             faulthandler.cancel_dump_traceback_later()
