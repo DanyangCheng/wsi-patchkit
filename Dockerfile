@@ -9,6 +9,7 @@ LABEL org.opencontainers.image.title="wsi-patchkit" \
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
+    PATCHKIT_AUTH_DB=/data/auth/auth.sqlite3 \
     PIP_DISABLE_PIP_VERSION_CHECK=1
 
 WORKDIR /app
@@ -16,7 +17,7 @@ ENV PATH="/app/.venv/bin:$PATH"
 
 RUN groupadd --system --gid 10001 patchkit \
     && useradd --system --uid 10001 --gid patchkit --home-dir /app patchkit \
-    && mkdir -p /data/slides /data/overlays /data/crops /data/uploads /data/cache \
+    && mkdir -p /data/slides /data/overlays /data/crops /data/uploads /data/cache /data/auth \
     && chown -R patchkit:patchkit /app /data
 
 # Copy packaging metadata first so dependency installation remains cached when
@@ -29,7 +30,7 @@ RUN uv venv /app/.venv && uv pip install --python /app/.venv/bin/python ".[web]"
 USER patchkit
 
 EXPOSE 8000
-VOLUME ["/data/crops", "/data/uploads", "/data/cache"]
+VOLUME ["/data/crops", "/data/uploads", "/data/cache", "/data/auth"]
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
     CMD ["/app/.venv/bin/python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/healthz', timeout=3)"]

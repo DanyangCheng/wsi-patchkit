@@ -37,6 +37,7 @@ from ..io import AutoSlideReader, SlideReader
 from ..io.image import IMAGE_EXTENSIONS
 from ..tiles import TileRenderer, iiif_scale_factors
 from ..types import SlideMetadata, as_mpp
+from .access import FileAccess, namespace, private_directory
 from .auth import AdminAuth, install_auth
 from .crops import CropJobQueue
 from .detections import DetectionOverlay, bounds
@@ -47,6 +48,9 @@ from .workers import TileWorkerPool
 _STATIC_DIR = Path(__file__).with_name("static")
 _LOGGER = logging.getLogger(__name__)
 _STATIC_ASSETS = {
+    "register.js": (_STATIC_DIR / "register.js").read_bytes(),
+    "users.js": (_STATIC_DIR / "users.js").read_bytes(),
+    "users.css": (_STATIC_DIR / "users.css").read_bytes(),
     "auth.js": (_STATIC_DIR / "auth.js").read_bytes(),
     "login.js": (_STATIC_DIR / "login.js").read_bytes(),
     "login.css": (_STATIC_DIR / "login.css").read_bytes(),
@@ -353,18 +357,32 @@ def create_app(
 
     @asynccontextmanager
     async def lifespan(_: FastAPI):
-        yield
-        crop_jobs.close()
-        discovery_workers.close()
-        metadata_workers.close()
-        overlay_workers.close()
-        overlay_renderer.close()
-        overlay_registry.close()
-        workers.close()
-        renderer.close()
+        try:
+            yield
+        finally:
+            if auth is not None:
+                app.state.auth_store.close()
+            crop_jobs.close()
+            discovery_workers.close()
+            metadata_workers.close()
+            overlay_workers.close()
+            overlay_renderer.close()
+            overlay_registry.close()
+            workers.close()
+            renderer.close()
 
     app = FastAPI(title="wsi-patchkit viewer", lifespan=lifespan)
     install_auth(app, auth)
+    file_access = None
+    if auth is not None:
+        file_access = FileAccess(
+            app.state.auth_store,
+            registry,
+            slide_scanner.directories if slide_scanner is not None else (),
+            upload_directory,
+            crop_directory,
+        )
+        app.state.file_access = file_access
     app.state.slide_registry = registry
     app.state.overlay_registry = overlay_registry
     app.state.overlay_renderer = overlay_renderer
@@ -376,6 +394,21 @@ def create_app(
     app.state.crop_output_dir = crop_directory
     app.state.crop_jobs = crop_jobs
     app.state.upload_dir = upload_directory
+
+    def load_private_uploads() -> None:
+        if auth is None:
+            return
+        for record in app.state.auth_store.all_uploads():
+            directory = private_directory(upload_directory, record["user_id"])
+            filename = record["filename"]
+            if filename != Path(filename).name:
+                continue
+            path = directory / filename
+            if path.is_file() and not path.is_symlink():
+                uploaded_sources[record["id"]] = SlideSource(path)
+        registry.replace({**dict(registry), **uploaded_sources})
+
+    load_private_uploads()
 
     def publish_slides(scanned: Mapping[str, SlideSource | str | Path]) -> None:
         uploaded_paths = {source.path for source in uploaded_sources.values()}
@@ -485,19 +518,21 @@ def create_app(
             headers={"Cache-Control": "no-cache"},
         )
 
-    def saved_crop_path(filename: str) -> Path:
+    def saved_crop_path(filename: str, owner: str | None = None) -> Path:
         if (
             not _CROP_FILENAME.fullmatch(filename)
             or Path(filename).name != filename
             or Path(filename).suffix.lower() not in _CROP_IMAGE_EXTENSIONS
         ):
             raise HTTPException(status_code=404, detail="unknown crop")
-        path = crop_directory / filename
+        path = private_directory(crop_directory, owner) / filename
         if path.is_symlink() or not path.is_file():
             raise HTTPException(status_code=404, detail="unknown crop")
         return path
 
-    def crop_filenames(payload: Mapping[str, object]) -> list[str]:
+    def crop_filenames(
+        payload: Mapping[str, object], owner: str | None = None
+    ) -> list[str]:
         value = payload.get("filenames")
         if not isinstance(value, list) or not value:
             raise HTTPException(
@@ -508,31 +543,32 @@ def create_app(
             raise HTTPException(status_code=400, detail="invalid crop filename")
         filenames = list(dict.fromkeys(value))
         for filename in filenames:
-            saved_crop_path(filename)
+            saved_crop_path(filename, owner)
         return filenames
 
-    def create_crop_archive(filenames: list[str]) -> str:
+    def create_crop_archive(filenames: list[str], owner: str | None = None) -> str:
         descriptor, archive_name = tempfile.mkstemp(
             prefix=".crop-download-",
             suffix=".zip",
-            dir=crop_directory,
+            dir=private_directory(crop_directory, owner),
         )
         os.close(descriptor)
         try:
             with ZipFile(archive_name, "w", compression=ZIP_STORED) as archive:
                 for filename in filenames:
-                    archive.write(saved_crop_path(filename), arcname=filename)
+                    archive.write(saved_crop_path(filename, owner), arcname=filename)
         except Exception:
             Path(archive_name).unlink(missing_ok=True)
             raise
         return archive_name
 
     @app.get("/api/crops", name="list_crops")
-    def list_crops() -> list[dict[str, object]]:
-        if not crop_directory.is_dir():
+    def list_crops(request: Request) -> list[dict[str, object]]:
+        directory = private_directory(crop_directory, namespace(request))
+        if not directory.is_dir():
             return []
         records = []
-        for path in crop_directory.iterdir():
+        for path in directory.iterdir():
             if (
                 path.is_symlink()
                 or not path.is_file()
@@ -561,8 +597,8 @@ def create_app(
         return records
 
     @app.get("/api/crops/{filename}/image", name="crop_image")
-    async def crop_image(filename: str) -> FileResponse:
-        path = saved_crop_path(filename)
+    async def crop_image(filename: str, request: Request) -> FileResponse:
+        path = saved_crop_path(filename, namespace(request))
         media_type = "image/png" if path.suffix.lower() == ".png" else "image/jpeg"
         return FileResponse(
             path,
@@ -571,8 +607,8 @@ def create_app(
         )
 
     @app.get("/api/crops/{filename}/download", name="download_crop")
-    async def download_crop(filename: str) -> FileResponse:
-        path = saved_crop_path(filename)
+    async def download_crop(filename: str, request: Request) -> FileResponse:
+        path = saved_crop_path(filename, namespace(request))
         media_type = "image/png" if path.suffix.lower() == ".png" else "image/jpeg"
         return FileResponse(
             path,
@@ -602,8 +638,10 @@ def create_app(
             ) from error
         if not isinstance(payload, Mapping):
             raise HTTPException(status_code=400, detail="invalid crop download request")
-        filenames = crop_filenames(payload)
-        archive_name = await asyncio.to_thread(create_crop_archive, filenames)
+        filenames = crop_filenames(payload, namespace(request))
+        archive_name = await asyncio.to_thread(
+            create_crop_archive, filenames, namespace(request)
+        )
         return FileResponse(
             archive_name,
             media_type="application/zip",
@@ -613,10 +651,12 @@ def create_app(
         )
 
     @app.post("/api/crops/batch-delete", name="delete_crops")
-    async def delete_crops(payload: dict[str, object]) -> dict[str, object]:
-        filenames = crop_filenames(payload)
+    async def delete_crops(
+        payload: dict[str, object], request: Request
+    ) -> dict[str, object]:
+        filenames = crop_filenames(payload, namespace(request))
         try:
-            crop_jobs.delete_saved_crops(filenames)
+            crop_jobs.delete_saved_crops(filenames, namespace=namespace(request))
         except FileNotFoundError as error:
             raise HTTPException(status_code=404, detail="unknown crop") from error
         except RuntimeError as error:
@@ -627,10 +667,10 @@ def create_app(
         return {"filenames": filenames, "deleted": len(filenames)}
 
     @app.delete("/api/crops/{filename}", name="delete_crop")
-    async def delete_crop(filename: str) -> dict[str, object]:
-        saved_crop_path(filename)
+    async def delete_crop(filename: str, request: Request) -> dict[str, object]:
+        saved_crop_path(filename, namespace(request))
         try:
-            crop_jobs.delete_saved_crops([filename])
+            crop_jobs.delete_saved_crops([filename], namespace=namespace(request))
         except FileNotFoundError as error:
             raise HTTPException(status_code=404, detail="unknown crop") from error
         except RuntimeError as error:
@@ -641,7 +681,10 @@ def create_app(
         return {"filename": filename, "deleted": True}
 
     @app.get("/api/slides", name="list_slides")
-    async def list_slides() -> list[dict[str, object]]:
+    async def list_slides(request: Request) -> list[dict[str, object]]:
+        load_private_uploads()
+        if file_access is not None:
+            file_access.refresh_groups()
         relative_paths: dict[str, str] = {}
         if slide_scanner is not None:
             try:
@@ -653,12 +696,22 @@ def create_app(
         # WSI metadata can be expensive, so defer it until a slide is selected.
         records = []
         for slide_id in registry:
+            if file_access is not None and not file_access.allowed_slide(
+                request.state.user, slide_id
+            ):
+                continue
             record: dict[str, object] = {
                 "id": slide_id,
                 "has_predictions": bool(overlay_registry.for_slide(slide_id)),
             }
             if slide_id in uploaded_sources:
-                record["path"] = f"上传切片/{uploaded_sources[slide_id].path.name}"
+                uploaded = app.state.auth_store.uploaded(slide_id) if auth else None
+                display_name = (
+                    uploaded["display_name"]
+                    if uploaded
+                    else uploaded_sources[slide_id].path.name
+                )
+                record["path"] = f"上传切片/{display_name}"
             elif slide_id in relative_paths:
                 record["path"] = relative_paths[slide_id]
             records.append(record)
@@ -677,11 +730,13 @@ def create_app(
             and int(content_length) > max_upload_bytes
         ):
             raise HTTPException(status_code=413, detail="slide upload is too large")
-        upload_directory.mkdir(parents=True, exist_ok=True)
+        owner = namespace(request)
+        directory = private_directory(upload_directory, owner)
+        directory.mkdir(parents=True, exist_ok=True)
         descriptor, temporary_name = tempfile.mkstemp(
             prefix=".upload-",
             suffix=Path(safe_name).suffix,
-            dir=upload_directory,
+            dir=directory,
         )
         temporary_path = Path(temporary_name)
         try:
@@ -712,24 +767,41 @@ def create_app(
                 ) from error
 
             async with upload_lock:
-                stem, suffix = Path(safe_name).stem, Path(safe_name).suffix
-                candidate = safe_name
-                number = 2
-                while (
-                    upload_directory / candidate
-                ).exists() or f"upload_{candidate}" in registry:
-                    tail = f"-{number}"
-                    max_stem = 128 - len(suffix) - len("upload_") - len(tail)
-                    candidate = f"{stem[:max_stem]}{tail}{suffix}"
-                    number += 1
-                destination = upload_directory / candidate
-                os.replace(temporary_path, destination)
-                slide_id = f"upload_{candidate}"
+                if owner is not None:
+                    file_id = uuid.uuid4().hex
+                    candidate = file_id + Path(safe_name).suffix
+                    destination = directory / candidate
+                    slide_id = f"upload_{file_id}"
+                    os.replace(temporary_path, destination)
+                    try:
+                        app.state.auth_store.add_upload(
+                            slide_id, owner, candidate, safe_name
+                        )
+                    except Exception:
+                        destination.unlink(missing_ok=True)
+                        raise
+                else:
+                    stem, suffix = Path(safe_name).stem, Path(safe_name).suffix
+                    candidate = safe_name
+                    number = 2
+                    while (
+                        directory / candidate
+                    ).exists() or f"upload_{candidate}" in registry:
+                        tail = f"-{number}"
+                        max_stem = 128 - len(suffix) - len("upload_") - len(tail)
+                        candidate = f"{stem[:max_stem]}{tail}{suffix}"
+                        number += 1
+                    destination = directory / candidate
+                    os.replace(temporary_path, destination)
+                    slide_id = f"upload_{candidate}"
                 uploaded_sources[slide_id] = SlideSource(destination)
                 registry.replace(
                     {**dict(registry), slide_id: uploaded_sources[slide_id]}
                 )
-            return {"id": slide_id, "path": f"上传切片/{candidate}"}
+            return {
+                "id": slide_id,
+                "path": f"上传切片/{safe_name if owner else candidate}",
+            }
         finally:
             temporary_path.unlink(missing_ok=True)
 
@@ -793,6 +865,7 @@ def create_app(
     async def save_slide_crop(
         slide_id: str,
         payload: dict[str, object],
+        request: Request,
     ) -> JSONResponse:
         source, metadata = await metadata_workers.run(metadata_for, slide_id)
         try:
@@ -831,6 +904,7 @@ def create_app(
                 level=level,
                 image_format=image_format,  # type: ignore[arg-type]
                 filename=filename,
+                namespace=namespace(request),
             )
         except FileExistsError as error:
             raise HTTPException(
@@ -845,10 +919,14 @@ def create_app(
         return JSONResponse(status_code=202, content=job)
 
     @app.get("/api/slides/{slide_id}/crops/{job_id}", name="crop_status")
-    async def crop_status(slide_id: str, job_id: str) -> dict[str, object]:
+    async def crop_status(
+        slide_id: str, job_id: str, request: Request
+    ) -> dict[str, object]:
         source_for(slide_id)
         try:
-            return crop_jobs.get(job_id, slide_id=slide_id)
+            return crop_jobs.get(
+                job_id, slide_id=slide_id, namespace=namespace(request)
+            )
         except KeyError as error:
             raise HTTPException(
                 status_code=404,

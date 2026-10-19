@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>申请注册 · WSI Patchkit</title>
+    <link rel="stylesheet" href="/static/login.css">
+    <script src="/static/register.js" defer></script>
+  </head>
+  <body>
+    <main>
+      <p class="brand">WSI PATCHKIT</p>
+      <h1>申请注册</h1>
+      <form id="register-form">
+        <label for="username">账号</label>
+        <input id="username" name="username" autocomplete="username" minlength="3" maxlength="64" required autofocus aria-describedby="username-help">
+        <p id="username-help">3–64 个字母、数字、点、下划线或短横线。</p>
+        <label for="password">密码</label>
+        <input id="password" name="password" type="password" autocomplete="new-password" minlength="12" maxlength="1024" required aria-describedby="password-help">
+        <p id="password-help">至少 12 个字符。</p>
+        <label for="password-confirm">确认密码</label>
+        <input id="password-confirm" name="password_confirm" type="password" autocomplete="new-password" minlength="12" maxlength="1024" required>
+        <p id="error" role="alert" aria-live="polite"></p>
+        <button type="submit">提交申请</button>
+      </form>
+      <p id="result" role="status" aria-live="polite"></p>
+      <p><a href="/login">返回登录</a></p>
+    </main>
+  </body>
+</html>

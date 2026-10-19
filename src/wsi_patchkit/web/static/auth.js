@@ -23,6 +23,13 @@
   };
   session.then((state) => {
     if (!state.enabled) return;
+    if (state.user?.is_admin && location.pathname !== "/admin/users") {
+      const link = document.createElement("a");
+      link.href = "/admin/users";
+      link.textContent = "账号管理";
+      link.className = "toolbar-link";
+      document.querySelector("header")?.append(link);
+    }
     const button = document.createElement("button");
     button.type = "button";
     button.textContent = "退出登录";

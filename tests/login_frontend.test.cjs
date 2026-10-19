@@ -72,3 +72,11 @@ test("HTTPS requirement is explained before cookie creation", async () => {
   assert.equal(screen.button.disabled, false);
   assert.equal(screen.destination(), undefined);
 });
+
+test("pending account displays review status without navigation", async () => {
+  const screen = page(async () => ({ ok: false, status: 403, json: async () => ({ detail: "account_pending" }) }));
+  await screen.submit();
+  assert.match(screen.error.textContent, /等待管理员审核/);
+  assert.equal(screen.destination(), undefined);
+  assert.equal(screen.button.disabled, false);
+});

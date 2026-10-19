@@ -28,6 +28,17 @@ document.querySelector("#login-form").addEventListener("submit", async (event) =
         : "登录会话未生效，请检查浏览器 Cookie 设置。";
       return;
     }
+    if (response.status === 403) {
+      const result = await response.json();
+      if (result.detail === "account_pending") {
+        error.textContent = "账号正在等待管理员审核，请审核通过后再登录。";
+        return;
+      }
+      if (result.detail === "account_rejected") {
+        error.textContent = "注册申请未通过审核，请联系管理员。";
+        return;
+      }
+    }
     error.textContent = response.status === 429
       ? "登录尝试过于频繁，请一分钟后重试。"
       : [409, 426].includes(response.status) ? "当前服务要求 HTTPS，请通过 HTTPS 地址访问。"

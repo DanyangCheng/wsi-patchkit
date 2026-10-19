@@ -1,0 +1,19 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>账号管理 · WSI Patchkit</title>
+    <link rel="stylesheet" href="/static/users.css">
+    <script src="/static/auth.js" defer></script>
+    <script src="/static/users.js" defer></script>
+  </head>
+  <body>
+    <header><a href="/">WSI PATCHKIT · 返回查看器</a></header>
+    <main>
+      <div class="heading"><div><h1>账号管理</h1><p>审核注册申请，并分配可访问的文件组。</p></div><button id="refresh" type="button">刷新列表</button></div>
+      <p id="status" role="status" aria-live="polite"></p>
+      <div id="users" aria-label="账号列表"></div>
+    </main>
+  </body>
+</html>

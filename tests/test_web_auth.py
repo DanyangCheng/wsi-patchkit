@@ -208,14 +208,14 @@ async def test_authenticated_upload_iiif_and_tile(secured):
 async def test_session_rotation_expiry_and_restart(
     tmp_path, password_hash, monkeypatch
 ):
-    import wsi_patchkit.web.auth as module
+    import wsi_patchkit.web.auth_store as module
 
     now = [1000.0]
 
     # Replace only this module's clock, not asyncio's shared time module.
     class Clock:
         @staticmethod
-        def monotonic():
+        def time():
             return now[0]
 
     monkeypatch.setattr(module, "time", Clock)
@@ -257,7 +257,7 @@ async def test_session_rotation_expiry_and_restart(
             old = client.cookies.get("__Host-patchkit_session")
 
 
-def test_password_hash_and_configuration(password_hash, monkeypatch):
+def test_password_hash_and_configuration(password_hash, monkeypatch, tmp_path):
     algorithm, iterations, salt, digest = password_hash.split("$")
     assert algorithm == "pbkdf2_sha256"
     assert (
@@ -276,6 +276,7 @@ def test_password_hash_and_configuration(password_hash, monkeypatch):
         AdminAuth("admin", "plaintext")
     monkeypatch.delenv("PATCHKIT_ADMIN_PASSWORD_HASH", raising=False)
     monkeypatch.delenv("PATCHKIT_ADMIN_PASSWORD_HASH_FILE", raising=False)
+    monkeypatch.setenv("PATCHKIT_AUTH_DB", str(tmp_path / "missing.sqlite3"))
     with pytest.raises(ValueError, match="Set PATCHKIT"):
         AdminAuth.from_env()
 

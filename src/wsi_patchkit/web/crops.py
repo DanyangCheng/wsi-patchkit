@@ -26,6 +26,7 @@ class _CropJob:
     level: int
     image_format: ImageFormat
     filename: str
+    namespace: str | None = None
     status: CropJobStatus = "queued"
     error: str | None = None
 
@@ -61,7 +62,7 @@ class CropJobQueue:
         self._output_dir = Path(output_dir)
         self._queue: queue.Queue[_CropJob | None] = queue.Queue()
         self._jobs: dict[str, _CropJob] = {}
-        self._reserved_filenames: set[str] = set()
+        self._reserved_filenames: set[tuple[str | None, str]] = set()
         self._lock = threading.Lock()
         self._closed = False
         self._threads = tuple(
@@ -88,6 +89,7 @@ class CropJobQueue:
         level: int,
         image_format: ImageFormat,
         filename: str,
+        namespace: str | None = None,
     ) -> dict[str, object]:
         job = _CropJob(
             uuid.uuid4().hex,
@@ -97,33 +99,40 @@ class CropJobQueue:
             level,
             image_format,
             filename,
+            namespace=namespace,
         )
         with self._lock:
             if self._closed:
                 raise RuntimeError("crop queue is closed")
-            if (
-                filename in self._reserved_filenames
-                or (self._output_dir / filename).exists()
-            ):
+            if (namespace, filename) in self._reserved_filenames or (
+                self._directory(namespace) / filename
+            ).exists():
                 raise FileExistsError(filename)
             self._jobs[job.job_id] = job
-            self._reserved_filenames.add(filename)
+            self._reserved_filenames.add((namespace, filename))
             self._queue.put(job)
             return job.public()
 
-    def get(self, job_id: str, *, slide_id: str) -> dict[str, object]:
+    def get(
+        self, job_id: str, *, slide_id: str, namespace: str | None = None
+    ) -> dict[str, object]:
         with self._lock:
             job = self._jobs.get(job_id)
-            if job is None or job.slide_id != slide_id:
+            if job is None or job.slide_id != slide_id or job.namespace != namespace:
                 raise KeyError(job_id)
             return job.public()
 
-    def delete_saved_crops(self, filenames: list[str]) -> None:
+    def delete_saved_crops(
+        self, filenames: list[str], *, namespace: str | None = None
+    ) -> None:
         """Delete saved crops unless a queued job currently owns a filename."""
         with self._lock:
-            if any(filename in self._reserved_filenames for filename in filenames):
+            if any(
+                (namespace, filename) in self._reserved_filenames
+                for filename in filenames
+            ):
                 raise RuntimeError("crop is still being rendered")
-            paths = [self._output_dir / filename for filename in filenames]
+            paths = [self._directory(namespace) / filename for filename in filenames]
             if any(path.is_symlink() or not path.is_file() for path in paths):
                 raise FileNotFoundError("one or more crops do not exist")
             for path in paths:
@@ -152,6 +161,18 @@ class CropJobQueue:
             else:
                 self._finish(job, "completed")
 
+    def _directory(self, namespace: str | None) -> Path:
+        if namespace is None:
+            return self._output_dir
+        if len(namespace) != 32 or any(c not in "0123456789abcdef" for c in namespace):
+            raise ValueError("invalid crop namespace")
+        directory = self._output_dir / namespace
+        if directory.is_symlink() or not directory.resolve().is_relative_to(
+            self._output_dir.resolve()
+        ):
+            raise ValueError("invalid crop directory")
+        return directory
+
     def _save(self, job: _CropJob) -> None:
         encoded = self._renderer.render_level_region(
             job.source.path,
@@ -160,8 +181,9 @@ class CropJobQueue:
             image_format=job.image_format,
             source_mpp=job.source.source_mpp,
         )
-        self._output_dir.mkdir(parents=True, exist_ok=True)
-        destination = self._output_dir / job.filename
+        directory = self._directory(job.namespace)
+        directory.mkdir(parents=True, exist_ok=True)
+        destination = directory / job.filename
         with destination.open("xb") as output:
             output.write(encoded.content)
 
@@ -174,7 +196,7 @@ class CropJobQueue:
         with self._lock:
             job.status = status
             job.error = error
-            self._reserved_filenames.discard(job.filename)
+            self._reserved_filenames.discard((job.namespace, job.filename))
 
     def close(self) -> None:
         with self._lock:

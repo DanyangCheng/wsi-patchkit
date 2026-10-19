@@ -184,7 +184,14 @@ Install the optional web dependencies:
 uv sync --extra web
 ```
 
-The CLI requires administrator credentials and serves HTTP by default. See
+The CLI uses a SQLite user database and server-side sessions, and serves HTTP by
+default. The first startup requires an administrator password hash. Set
+`PATCHKIT_AUTH_DB` to choose the database location (default `data/auth.sqlite3`).
+Users and unexpired sessions survive restarts. Users apply at `/register`;
+administrators review accounts and assign file groups at `/admin/users`. A group
+is a top-level directory under a scanned slide root. Ordinary users see only their
+authorized groups and their own uploads and crops. Password changes revoke all
+sessions for that user. See
 [administrator login and HTTPS deployment](docs/SECURITY_DEPLOYMENT.md) to generate
 the password hash, configure cookies, and deploy Caddy. For local development
 without authentication, explicitly add `--no-auth` to the commands below.

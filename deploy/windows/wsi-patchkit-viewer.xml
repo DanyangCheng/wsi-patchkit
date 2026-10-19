@@ -7,6 +7,7 @@
   <workingdirectory>@PROJECT_DIR@</workingdirectory>
   <env name="PATCHKIT_ADMIN_PASSWORD_HASH_FILE" value="%BASE%\admin-password.hash" />
   <env name="PATCHKIT_COOKIE_SECURE" value="false" />
+  <env name="PATCHKIT_AUTH_DB" value="%BASE%\data\auth.sqlite3" />
   <startmode>Automatic</startmode>
   <delayedAutoStart>true</delayedAutoStart>
   <onfailure action="restart" delay="10 sec" />
