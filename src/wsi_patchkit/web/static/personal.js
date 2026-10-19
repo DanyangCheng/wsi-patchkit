@@ -106,8 +106,22 @@
       if (j.status === "queued") actions.push(action("取消", async () => { await api(`/api/personal/jobs/${j.job_id}/cancel`, "POST"); await refresh(); }));
       if (["failed", "cancelled"].includes(j.status)) actions.push(action("重试", async () => { await api(`/api/personal/jobs/${j.job_id}/retry`, "POST"); await refresh(); }));
       if (j.status === "completed" && crops.some(r => r.filename === j.filename)) actions.push(link("下载", `/api/crops/${encodeURIComponent(j.filename)}/download`));
-      const r = row(j.filename, `${states[j.status]} · Level ${j.level} · ${j.region.width} × ${j.region.height} · ${date(j.created_at)}${j.error ? ` · ${j.error}` : ""}`, actions);
-      r.classList.add("panel"); return r;
+      const r = node("article", undefined, "job-record");
+      const body = node("div", undefined, "job-main");
+      const filename = node("h2", j.filename, "job-filename");
+      const metadata = node("div", undefined, "job-meta");
+      metadata.append(
+        node("span", states[j.status], `job-state job-state--${j.status}`),
+        node("span", `Level ${j.level}`),
+        node("span", `${j.region.width} × ${j.region.height}`),
+        node("span", date(j.created_at)),
+      );
+      body.append(filename, metadata);
+      if (j.error) body.append(node("p", j.error, "job-error"));
+      const controls = node("div", undefined, "actions job-actions");
+      controls.append(...actions);
+      r.append(body, controls);
+      return r;
     }));
     if (!filtered.length) empty($("#job-list"), "当前没有此状态的任务。");
   }

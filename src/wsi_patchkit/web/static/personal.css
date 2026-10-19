@@ -2,6 +2,70 @@
 
 .dialog-heading{position:sticky;top:-28px;background:#101923;z-index:2;padding:12px 0;border-bottom:1px solid var(--line)}@media(max-width:700px){.dialog-heading{top:-20px}}
 
+#job-list {
+  display: grid;
+  gap: 14px;
+}
+.job-record {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+  padding: 20px 24px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: #121c27;
+  min-width: 0;
+}
+.job-main {
+  flex: 1;
+  min-width: 0;
+}
+.job-filename {
+  margin: 0 0 10px;
+  font-size: 14px;
+  font-weight: 550;
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+}
+.job-meta {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.6;
+}
+.job-state {
+  padding: 3px 9px;
+  border-radius: 5px;
+  background: #26313e;
+  color: #c3cfdd;
+}
+.job-state--completed { background: #23362f; color: #a6e7ca; }
+.job-state--running { background: #1c334a; color: #a8d5ff; }
+.job-state--queued { background: #3b3322; color: #efcf91; }
+.job-state--failed { background: #3c242c; color: #ffb2b9; }
+.job-error {
+  margin: 10px 0 0;
+  color: #ffb2b9;
+  font-size: 12px;
+  line-height: 1.7;
+  overflow-wrap: anywhere;
+}
+.job-actions {
+  flex-shrink: 0;
+  justify-content: flex-end;
+}
+.job-actions > * { white-space: nowrap; }
+@media (max-width: 900px) {
+  .job-record { flex-direction: column; align-items: stretch; gap: 16px; }
+  .job-actions { justify-content: flex-start; }
+}
+@media (max-width: 700px) {
+  .job-record { padding: 18px 16px; }
+}
+
 .personal-header {
   display: flex;
   align-items: center;
