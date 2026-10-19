@@ -327,7 +327,7 @@ def test_discover_overlays_uses_manifest_ids_and_source_stem_aliases(
             self.slide_id = slide_id
             self.overlay_id = "prediction"
 
-    def load_manifest(path: str | Path) -> Manifest:
+    def load_manifest(path: str | Path, **kwargs) -> Manifest:
         slide_id = "Result-404" if Path(path).parent == matching else "other"
         return Manifest(slide_id)
 

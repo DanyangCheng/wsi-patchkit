@@ -22,6 +22,13 @@ def valid_public_id(value: str, *, name: str = "public ID") -> str:
     return value
 
 
+def manifest_slide_id(value: object, aliases: Mapping[str, str] | None = None) -> str:
+    """Resolve an exact source-stem alias before validating its public ID."""
+    if isinstance(value, str) and aliases is not None:
+        value = aliases.get(value, value)
+    return valid_public_id(value, name="slide ID")
+
+
 @dataclass(frozen=True, slots=True)
 class SlideSource:
     """One server-side WSI and an optional physical-resolution override."""

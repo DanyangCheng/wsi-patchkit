@@ -334,3 +334,24 @@ async def test_api_gate_pagination_registration_and_cleanup(tmp_path):
             await client.get("/iiif/3/case/overlays/nuclei/info.json")
         ).status_code == 400
     assert not index_path.exists()
+
+
+@pytest.mark.parametrize("stem", ["Z2213809 -13-24PILC-HE", "测序病例 (2)"])
+def test_detection_source_stem_alias(tmp_path: Path, stem: str) -> None:
+    from wsi_patchkit.web import OverlayRegistry
+
+    path = manifest(tmp_path, slide_id=stem)
+    with pytest.raises(ValueError, match="slide ID"):
+        load_overlay_manifest(path)
+    aliases = {stem: "case.svs"}
+    discovered = discover_overlays(
+        [tmp_path], slide_ids=["case.svs"], slide_id_aliases=aliases
+    )
+    registry = OverlayRegistry(
+        discovered, slide_ids=["case.svs"], manifest_slide_id_aliases=aliases
+    )
+    overlay = registry.get("case.svs", "nuclei")
+    try:
+        assert overlay.slide_id == "case.svs"
+    finally:
+        overlay.close()

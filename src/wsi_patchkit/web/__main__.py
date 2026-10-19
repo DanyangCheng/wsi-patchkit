@@ -190,7 +190,7 @@ def discover_overlays(
     predictions for more slides than the current viewer exposes.
     """
     from .overlays import load_indexed_overlay_manifest
-    from .registry import valid_public_id
+    from .registry import manifest_slide_id, valid_public_id
 
     registered = set(slide_ids)
     aliases = dict(slide_id_aliases or {})
@@ -210,12 +210,14 @@ def discover_overlays(
                 and payload.get("schema") == "wsi-patchkit-detection/v1"
             ):
                 # Import records once, when OverlayRegistry registers this path.
-                manifest_id = valid_public_id(payload.get("slide_id"), name="slide ID")
+                manifest_id = manifest_slide_id(payload.get("slide_id"), aliases)
                 overlay_id = valid_public_id(
                     payload.get("overlay_id"), name="overlay ID"
                 )
             else:
-                overlay = load_indexed_overlay_manifest(manifest)
+                overlay = load_indexed_overlay_manifest(
+                    manifest, slide_id_aliases=aliases
+                )
                 manifest_id, overlay_id = overlay.slide_id, overlay.overlay_id
             slide_id = (
                 manifest_id if manifest_id in registered else aliases.get(manifest_id)

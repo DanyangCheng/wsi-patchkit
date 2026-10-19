@@ -22,7 +22,7 @@ from PIL import Image
 from ..io import TiffReader
 from ..tiles import EncodedImage, SlideReaderPool, choose_level_for_downsample
 from ..types import MPP, Size, SlideMetadata, as_mpp, as_size
-from .registry import valid_public_id
+from .registry import manifest_slide_id, valid_public_id
 
 if TYPE_CHECKING:
     from .detections import DetectionOverlay
@@ -302,7 +302,7 @@ class OverlayRegistry:
             current: dict[str, IndexedOverlay | DetectionOverlay] = {}
             for overlay_id, value in slide_overlays.items():
                 overlay = (
-                    load_overlay_manifest(value)
+                    load_overlay_manifest(value, slide_id_aliases=aliases)
                     if isinstance(value, (str, Path))
                     else value
                 )
@@ -359,7 +359,9 @@ def _pair(value: object, *, name: str, integer: bool = False) -> tuple:
         raise ValueError(f"{name} must contain two numbers") from error
 
 
-def load_overlay_manifest(path: str | Path) -> IndexedOverlay | DetectionOverlay:
+def load_overlay_manifest(
+    path: str | Path, *, slide_id_aliases: Mapping[str, str] | None = None
+) -> IndexedOverlay | DetectionOverlay:
     """Dispatch raster and object prediction manifests by explicit schema."""
     from .detections import load_detection_overlay_manifest
 
@@ -368,11 +370,13 @@ def load_overlay_manifest(path: str | Path) -> IndexedOverlay | DetectionOverlay
         isinstance(payload, dict)
         and payload.get("schema") == "wsi-patchkit-detection/v1"
     ):
-        return load_detection_overlay_manifest(path)
-    return load_indexed_overlay_manifest(path)
+        return load_detection_overlay_manifest(path, slide_id_aliases=slide_id_aliases)
+    return load_indexed_overlay_manifest(path, slide_id_aliases=slide_id_aliases)
 
 
-def load_indexed_overlay_manifest(path: str | Path) -> IndexedOverlay:
+def load_indexed_overlay_manifest(
+    path: str | Path, *, slide_id_aliases: Mapping[str, str] | None = None
+) -> IndexedOverlay:
     """Load and validate a ``wsi-patchkit-overlay/v1`` JSON manifest."""
     manifest_path = Path(path).resolve()
     if not manifest_path.is_file():
@@ -439,7 +443,7 @@ def load_indexed_overlay_manifest(path: str | Path) -> IndexedOverlay:
         )
 
     return IndexedOverlay(
-        slide_id=payload.get("slide_id"),
+        slide_id=manifest_slide_id(payload.get("slide_id"), slide_id_aliases),
         overlay_id=payload.get("overlay_id"),
         classes=classes,
         fragments=fragments,

@@ -426,3 +426,43 @@ async def test_viewer_applies_class_palette_and_visibility_from_style_url(
     assert np.asarray(Image.open(BytesIO(hidden.content)))[5, 5, 3] == 0
     assert invalid.status_code == 400
     assert stale.status_code == 404
+
+
+@pytest.mark.parametrize("stem", ["Z2213809 -13-24PILC-HE", "测序病例 (2)"])
+def test_discovery_and_registration_resolve_source_stems(
+    tmp_path: Path, stem: str
+) -> None:
+    from wsi_patchkit.web.__main__ import discover_overlays, discover_slides
+
+    slides = tmp_path / "slides"
+    slides.mkdir()
+    source = slides / f"{stem}.svs"
+    source.touch()
+    registered = discover_slides([slides])
+    public_id = next(iter(registered))
+    aliases = {stem: public_id}
+    _overlay(tmp_path)
+    manifest = tmp_path / "prediction.json"
+    manifest.write_text(json.dumps({
+        "schema": "wsi-patchkit-overlay/v1",
+        "encoding": "indexed",
+        "slide_id": stem,
+        "overlay_id": "prediction",
+        "classes": [{"id": 1, "name": "Nucleus", "rgba": [255, 0, 0, 160]}],
+        "fragments": [{
+            "prediction": "prediction-index.tif",
+            "full_coverage": True,
+            "origin_um": [0, 0], "mpp": [0.5, 0.5],
+            "dimensions": [4, 3], "revision": "test",
+        }],
+    }), encoding="utf-8")
+    with pytest.raises(ValueError, match="slide ID"):
+        load_indexed_overlay_manifest(manifest)
+    discovered = discover_overlays(
+        [tmp_path], slide_ids=registered, slide_id_aliases=aliases
+    )
+    registry = OverlayRegistry(
+        discovered, slide_ids=tuple(registered), manifest_slide_id_aliases=aliases
+    )
+    assert registry.get(public_id, "prediction").slide_id == public_id
+    assert json.loads(manifest.read_text(encoding="utf-8"))["slide_id"] == stem

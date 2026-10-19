@@ -9,6 +9,7 @@ import sqlite3
 import tempfile
 import threading
 from collections import OrderedDict
+from collections.abc import Mapping
 from pathlib import Path
 
 import numpy as np
@@ -16,7 +17,7 @@ import numpy as np
 from ..io import TiffReader
 from ..types import SlideMetadata
 from .overlays import BinaryRasterSource, OverlayClass, OverlayGeometry, _manifest_path
-from .registry import valid_public_id
+from .registry import manifest_slide_id, valid_public_id
 
 
 def numbers(value: object, length: int, name: str) -> tuple[float, ...]:
@@ -63,7 +64,9 @@ def _load_json(value):
 class DetectionOverlay:
     """Immutable imported revision; JSONL is read once, queries use SQLite R-tree."""
 
-    def __init__(self, path: str | Path) -> None:
+    def __init__(
+        self, path: str | Path, *, slide_id_aliases: Mapping[str, str] | None = None
+    ) -> None:
         self._directory = tempfile.TemporaryDirectory(prefix="patchkit-detections-")
         self._db = sqlite3.connect(
             str(Path(self._directory.name) / "points.sqlite"), check_same_thread=False
@@ -71,12 +74,12 @@ class DetectionOverlay:
         self._lock = threading.Lock()
         self._validated: set[tuple] = set()
         try:
-            self._load(Path(path).resolve())
+            self._load(Path(path).resolve(), slide_id_aliases)
         except Exception:
             self.close()
             raise
 
-    def _load(self, path: Path) -> None:
+    def _load(self, path: Path, slide_id_aliases: Mapping[str, str] | None) -> None:
         payload = _load_json(path.read_text(encoding="utf-8"))
         if not isinstance(payload, dict):
             raise ValueError("detection manifest must be an object")
@@ -86,7 +89,7 @@ class DetectionOverlay:
             raise ValueError("detection encoding must be objects")
         if payload.get("coordinate_system") != "slide_um":
             raise ValueError("detection coordinates must be slide_um")
-        self.slide_id = valid_public_id(payload.get("slide_id"), name="slide ID")
+        self.slide_id = manifest_slide_id(payload.get("slide_id"), slide_id_aliases)
         self.overlay_id = valid_public_id(payload.get("overlay_id"), name="overlay ID")
         self.revision = text_field(payload.get("revision"), "revision")
         self.display_name = text_field(
@@ -430,5 +433,7 @@ class DetectionOverlay:
         self._directory.cleanup()
 
 
-def load_detection_overlay_manifest(path: str | Path) -> DetectionOverlay:
-    return DetectionOverlay(path)
+def load_detection_overlay_manifest(
+    path: str | Path, *, slide_id_aliases: Mapping[str, str] | None = None
+) -> DetectionOverlay:
+    return DetectionOverlay(path, slide_id_aliases=slide_id_aliases)
