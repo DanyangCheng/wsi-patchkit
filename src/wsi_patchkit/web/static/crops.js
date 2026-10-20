@@ -62,7 +62,7 @@
     previewLink.setAttribute("aria-label", `在新标签页查看 ${crop.filename}`);
 
     const image = document.createElement("img");
-    image.src = crop.image_url;
+    image.src = crop.thumbnail_url;
     image.alt = crop.filename;
     image.loading = "lazy";
     image.decoding = "async";

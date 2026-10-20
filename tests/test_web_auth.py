@@ -58,6 +58,7 @@ async def test_all_data_and_schema_routes_require_session(secured):
         "/api/slides",
         "/api/crops",
         "/api/crops/x.png/image",
+        "/api/crops/x.png/thumbnail",
         "/api/crops/x.png/download",
         "/iiif/3/slide/info.json",
         "/iiif/3/slide/full/max/0/default.jpg",

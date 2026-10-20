@@ -43,6 +43,43 @@ def _write_slide(path: Path) -> None:
     )
 
 
+@pytest.mark.anyio
+@pytest.mark.parametrize(
+    "filename,mode,size,expected_size",
+    [
+        ("wide.jpg", "RGB", (1600, 800), (480, 240)),
+        ("tall.png", "RGBA", (800, 1600), (240, 480)),
+        ("small.png", "RGB", (80, 40), (80, 40)),
+    ],
+)
+async def test_crop_thumbnail(tmp_path, filename, mode, size, expected_size):
+    directory = tmp_path / "crops"
+    directory.mkdir()
+    path = directory / filename
+    color = (20, 40, 60, 128) if mode == "RGBA" else (20, 40, 60)
+    Image.new(mode, size, color).save(path)
+    original = path.read_bytes()
+    app = create_app({}, crop_output_dir=directory)
+    async with app.router.lifespan_context(app), httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="http://testserver",
+    ) as client:
+        record = (await client.get("/api/crops")).json()[0]
+        response = await client.get(record["thumbnail_url"])
+        assert response.status_code == 200
+        assert response.headers["content-type"] == "image/png"
+        assert response.headers["cache-control"] == "private, no-store"
+        with Image.open(BytesIO(response.content)) as thumbnail:
+            assert thumbnail.size == expected_size
+            if mode == "RGBA":
+                assert thumbnail.getpixel((0, 0))[3] == 128
+        assert (await client.get(record["image_url"])).content == original
+        assert (await client.get(record["download_url"])).content == original
+        assert (await client.get("/api/crops/missing.png/thumbnail")).status_code == 404
+        (directory / "linked.png").symlink_to(path)
+        assert (await client.get("/api/crops/linked.png/thumbnail")).status_code == 404
+    assert path.read_bytes() == original
+
+
 def test_registry_rejects_unsafe_ids(tmp_path: Path) -> None:
     path = tmp_path / "slide.tif"
     _write_slide(path)

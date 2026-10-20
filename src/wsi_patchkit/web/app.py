@@ -13,6 +13,7 @@ import uuid
 from collections.abc import Callable, Mapping
 from contextlib import asynccontextmanager, suppress
 from datetime import datetime, timezone
+from io import BytesIO
 from pathlib import Path
 from typing import TYPE_CHECKING, TypeVar
 from urllib.parse import parse_qs, quote
@@ -631,11 +632,28 @@ def create_app(
                         stat.st_mtime, tz=timezone.utc
                     ).isoformat(),
                     "image_url": f"/api/crops/{encoded_name}/image",
+                    "thumbnail_url": f"/api/crops/{encoded_name}/thumbnail",
                     "download_url": f"/api/crops/{encoded_name}/download",
                 }
             )
         records.sort(key=lambda record: str(record["modified_at"]), reverse=True)
         return records
+
+    @app.get("/api/crops/{filename}/thumbnail", name="crop_thumbnail")
+    def crop_thumbnail(filename: str, request: Request) -> Response:
+        path = saved_crop_path(filename, namespace(request))
+        with Image.open(path) as image:
+            image.thumbnail((480, 480), Image.Resampling.LANCZOS)
+            has_alpha = "A" in image.getbands() or "transparency" in image.info
+            thumbnail = image.convert("RGBA" if has_alpha else "RGB")
+            with BytesIO() as output:
+                thumbnail.save(output, format="PNG")
+                content = output.getvalue()
+        return Response(
+            content,
+            media_type="image/png",
+            headers={"Cache-Control": "private, no-store"},
+        )
 
     @app.get("/api/crops/{filename}/image", name="crop_image")
     async def crop_image(filename: str, request: Request) -> FileResponse:

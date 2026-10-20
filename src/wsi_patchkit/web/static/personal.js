@@ -132,7 +132,7 @@
     const filtered = visibleCrops();
     $("#crops-grid").replaceChildren(...filtered.map(r => {
       const c = node("article", undefined, "card"), image = node("img", undefined, "thumbnail");
-      image.src = r.image_url; image.alt = r.filename; image.loading = "lazy";
+      image.src = r.thumbnail_url; image.alt = r.filename; image.loading = "lazy"; image.decoding = "async";
       const body = node("div", undefined, "card-body"), label = node("label"), checkbox = node("input"); checkbox.type = "checkbox"; checkbox.checked = selected.has(r.filename); checkbox.setAttribute("aria-label", `选择 ${r.filename}`);
       checkbox.addEventListener("change", () => { checkbox.checked ? selected.add(r.filename) : selected.delete(r.filename); selectionInfo(); }); label.append(checkbox, document.createTextNode(" 选择"));
       body.append(label, node("h2", r.filename), node("p", `${bytes(r.size_bytes)} · ${date(r.modified_at)}`));
