@@ -606,6 +606,17 @@ main {
   grid-column: span 1;
 }
 
+.crop-selection-controls {
+  align-items: end;
+}
+
+#crop-finish-polygon {
+  height: 34px;
+  min-width: 0;
+  padding: 0 9px;
+  white-space: nowrap;
+}
+
 .crop-level-mpp {
   color: #a5f5e1;
   font-size: 11px;

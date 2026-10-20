@@ -107,7 +107,7 @@
           <strong>裁剪任务</strong>
           <button id="crop-close" type="button" aria-label="关闭裁剪">×</button>
         </div>
-        <div class="crop-fields"><label>选区方式<select id="crop-selection-mode"><option value="rectangle">矩形：点击两个角</option><option value="polygon">多边形：逐点点击</option><option value="move">移动矩形</option></select></label><button id="crop-finish-polygon" type="button">完成多边形</button></div>
+        <div class="crop-fields crop-selection-controls"><label>动作<select id="crop-selection-mode"><option value="rectangle">矩形</option><option value="polygon">多边形</option><option value="move">移动</option></select></label><button id="crop-finish-polygon" type="button" disabled>完成多边形</button></div>
         <p id="crop-selection-hint" class="crop-hint" role="status">在切片中点击两个角，选择裁剪区域。滚轮缩放，拖动平移。</p>
         <div class="crop-fields crop-coordinates">
           <label>x <input id="crop-x" type="number" min="0" step="1" /></label>
