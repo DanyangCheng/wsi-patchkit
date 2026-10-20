@@ -186,7 +186,10 @@ async def test_slide_directory_hot_scan_adds_and_removes_stable_files(
         _write_slide(second)
         assert (await client.get("/api/slides")).json() == []
         assert (await client.get("/api/slides")).json() == [
-            {"id": "group_nested_second.tif", "path": "group/nested/second.tif", "has_predictions": False}
+            {
+                "id": "group_nested_second.tif",
+                "path": "group/nested/second.tif",
+                "has_predictions": False}
         ]
 
 
