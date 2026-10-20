@@ -1,7 +1,7 @@
 # wsi-patchkit
 
 `wsi-patchkit` is a small, backend-neutral library for reading patches from
-whole-slide images (WSIs). Version 0.2 provides:
+whole-slide images (WSIs). Version 0.3 provides:
 
 - ordinary image (Pillow), TIFF, KFB, and OpenSlide readers with a common coordinate contract;
 - physical-resolution (MPP) metadata and level selection;
@@ -63,9 +63,10 @@ See the [sampling contract](docs/PHYSICAL_SAMPLING_CONTRACT.md) for details.
 
 Use `PhysicalPatchRequest.from_legacy(request)` to convert an old request's
 origin to `(x * target_mpp_x, y * target_mpp_y)`. Previously truncated fractions
-cannot be recovered. Legacy fractional/bool integer inputs and bool MPP emit
-`FutureWarning` in 0.2.0 and will be rejected in 0.3.0. Valid integer inputs
-and old helper pixel results remain compatible.
+cannot be recovered. Since 0.3.0, legacy integer fields reject booleans and
+non-integer types, including integer-valued floats; MPP rejects booleans.
+Use `PhysicalPatchRequest` for continuous origins. Valid Python and NumPy
+integers, fractional MPP, and old helper pixel results remain compatible.
 
 `SlideSpec.from_metadata(..., canvas_rounding="ceil")` propagates its strategy
 through grid, random, and tissue samplers into `PatchRequest`. Old helpers use

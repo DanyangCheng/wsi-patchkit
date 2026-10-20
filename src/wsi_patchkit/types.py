@@ -18,8 +18,6 @@ from ._canvas import CanvasRounding, canvas_size
 from ._validation import (
     derived_finite,
     integer,
-    legacy_integer_warning,
-    migration_warning,
     option,
     pair,
     physical_pair,
@@ -57,13 +55,13 @@ def as_mpp(value: float | Sequence[float], *, name: str = "mpp") -> MPP:
     """Validate a scalar or X/Y pair and return an MPP pair."""
     if isinstance(value, (Real, bool_)):
         if isinstance(value, (bool, bool_)):
-            migration_warning(name)
+            raise ValueError(f"{name} must exclude bool")
         pair = float(value), float(value)
     else:
         items = tuple(value)
         for item in items:
             if isinstance(item, (bool, bool_)):
-                migration_warning(name)
+                raise ValueError(f"{name} must exclude bool")
         pair = tuple(float(item) for item in items)
         if len(pair) != 2:
             raise ValueError(f"{name} must be a scalar or an X/Y pair")
@@ -74,14 +72,14 @@ def as_mpp(value: float | Sequence[float], *, name: str = "mpp") -> MPP:
 
 def as_size(value: int | Sequence[int], *, name: str = "size") -> Size:
     """Validate a scalar or width/height pair."""
-    if isinstance(value, (Integral, bool_)):
-        legacy_integer_warning(value, name)
-        pair = int(value), int(value)
+    if isinstance(value, (Real, bool_)):
+        scalar = integer(value, name)
+        pair = scalar, scalar
     else:
         items = tuple(value)
-        for axis, item in enumerate(items):
-            legacy_integer_warning(item, f"{name}[{axis}]")
-        pair = tuple(int(item) for item in items)
+        pair = tuple(
+            integer(item, f"{name}[{axis}]") for axis, item in enumerate(items)
+        )
         if len(pair) != 2:
             raise ValueError(f"{name} must be an integer or a width/height pair")
     if any(item < 1 for item in pair):
@@ -218,8 +216,7 @@ class PatchRequest:
         option(self.canvas_rounding, "canvas_rounding", ("round", "ceil"))
         object.__setattr__(self, "slide", str(Path(self.slide)))
         for name in ("x", "y", "width", "height", "fill_value"):
-            legacy_integer_warning(getattr(self, name), name)
-            object.__setattr__(self, name, int(getattr(self, name)))
+            object.__setattr__(self, name, integer(getattr(self, name), name))
         if self.width < 1 or self.height < 1:
             raise ValueError("patch width and height must be positive")
         if not 0 <= self.fill_value <= 255:

@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+## 0.3.0 — 2026-10-20
+
+- Reject deprecated implicit numeric conversions in `PatchRequest` integer
+  fields and `as_size`, including booleans, fractional values, and
+  integer-valued floats. Use `PhysicalPatchRequest` for continuous origins.
+- Reject boolean MPP values, including NumPy booleans, in scalar and pair forms.
+  Python and NumPy integers and finite positive fractional MPP remain supported.
+- Fix task-record card spacing, long filename wrapping, status display, and
+  responsive action placement in the personal workspace.
+- Align the polygon completion button with the selection control and disable
+  it until polygon selection is ready.
+
+## 0.2.0
+
 ### 0.2.0 — phase 1 physical sampling plans
 
 - Added strict `PhysicalPatchRequest`, `OutputGrid`, `SamplingLimits`, and

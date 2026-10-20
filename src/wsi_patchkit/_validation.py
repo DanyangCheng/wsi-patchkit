@@ -1,9 +1,8 @@
-"""Strict checks for the physical API and shared legacy migration messages."""
+"""Shared strict numeric checks for sampling APIs."""
 
 from __future__ import annotations
 
 import math
-import warnings
 from numbers import Integral, Real
 
 
@@ -65,18 +64,3 @@ def finite_product(left: int | float, right: float, name: str) -> float:
         return derived_finite(left * right, name)
     except OverflowError as error:
         raise ValueError(f"{name} derived range overflow") from error
-
-
-def legacy_integer_warning(value: object, name: str) -> None:
-    if isinstance(value, bool) or not isinstance(value, Integral):
-        migration_warning(name)
-
-
-def migration_warning(name: str) -> None:
-    warnings.warn(
-        f"{name}: implicit legacy numeric conversion is deprecated in 0.2.0; "
-        "use integer parameters or PhysicalPatchRequest for continuous origins. "
-        "These inputs will be rejected in 0.3.0.",
-        FutureWarning,
-        stacklevel=4,
-    )

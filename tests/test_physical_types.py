@@ -171,20 +171,38 @@ def test_legacy_conversion_uses_mpp_not_native_indices():
         ("source_mpp", (True, 0.5)),
     ],
 )
-def test_legacy_migration_warning_preserves_conversion(field, value):
+def test_legacy_deprecated_inputs_are_rejected(field, value):
     fields = dict(x=0, y=0, width=2, height=2, target_mpp=1)
     fields[field] = value
-    with pytest.warns(FutureWarning, match=f"{field}.*PhysicalPatchRequest.*0.3.0"):
-        old = PatchRequest("fixture", **fields)
-    if field == "x":
-        assert old.x == 0
-        assert PhysicalPatchRequest.from_legacy(old).origin_um == (0, 0)
+    with pytest.raises(ValueError, match=field):
+        PatchRequest("fixture", **fields)
 
 
-def test_legacy_shared_helpers_warn_for_bool_and_fractional_size():
-    with pytest.warns(FutureWarning, match="patch_size.*0.3.0"):
-        assert as_size((2.5, 3), name="patch_size") == (2, 3)
-    with pytest.warns(FutureWarning, match="mpp.*0.3.0"):
-        assert as_mpp(True) == (1, 1)
+@pytest.mark.parametrize("value", [True, np.bool_(True), 2.0, 2.5, np.float64(2)])
+@pytest.mark.parametrize("field", ["x", "y", "width", "height", "fill_value"])
+def test_legacy_integer_fields_reject_non_integer_types(field, value):
+    fields = dict(x=0, y=0, width=2, height=2, target_mpp=1)
+    fields[field] = value
+    with pytest.raises(ValueError, match=field):
+        PatchRequest("fixture", **fields)
+
+
+@pytest.mark.parametrize("value", [True, np.bool_(True), 2.0, 2.5, np.float64(2)])
+@pytest.mark.parametrize("as_pair", [False, True])
+def test_shared_size_rejects_deprecated_inputs(value, as_pair):
+    with pytest.raises(ValueError, match="patch_size"):
+        as_size((value, 3) if as_pair else value, name="patch_size")
+
+
+@pytest.mark.parametrize("value", [True, False, np.bool_(True), np.bool_(False)])
+@pytest.mark.parametrize("as_pair", [False, True])
+def test_shared_mpp_rejects_bool(value, as_pair):
+    with pytest.raises(ValueError, match="mpp"):
+        as_mpp((0.5, value) if as_pair else value)
+
+
+def test_shared_helpers_preserve_valid_numeric_inputs():
+    assert as_size(np.int64(2)) == (2, 2)
+    assert as_size((np.int32(2), 3)) == (2, 3)
     # Fractional MPP is a valid physical resolution, not an integer field.
     assert as_mpp((0.25, 0.5)) == (0.25, 0.5)

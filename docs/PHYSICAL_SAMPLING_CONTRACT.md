@@ -159,13 +159,13 @@ GeneratorExit 不吞掉清理失败。清理错误顺序固定：worker 编号�
 
 ## 兼容迁移
 
-当前版本 0.1.0 的合法整数 PatchRequest、Patch(request,image)、默认 round、旧 helper/旧流像素行为保留。
+0.1.0 的合法整数 PatchRequest、Patch(request,image)、默认 round、旧 helper/旧流像素行为保留。
 旧 helper 最近邻左边缘索引、Pillow bilinear/BOX、旧矩形 mask 保留，快照见 tests/fixtures/phase0。
-在 0.2.0（阶段 1）为旧分数/bool 的坐标、尺寸、fill 及 bool MPP 转换发出 FutureWarning，指出字段、
-PhysicalPatchRequest 替代方式及 0.3.0 拒绝版本；0.3.0 开始拒绝。拒绝时间以版本为界，不设日历截止日期。
+0.2.0（阶段 1）为旧分数/bool 的坐标、尺寸、fill 及 bool MPP 转换发出 FutureWarning。
+0.3.0 起，这些输入抛出 ValueError，错误指出对应字段；连续原点使用 PhysicalPatchRequest。
 阶段 0 不提前改变运行行为。其他旧入口的相同隐式转换在阶段 1 审计，并遵循同一迁移表。
 严格精确入口自首次发布即执行校验。不改变 viewer/IIIF 或 torch 默认数据项结构。
-合法的分数 MPP 保持支持。整数值浮点整数参数也提示迁移，0.3.0 与分数整数参数一起拒绝。
+合法的分数 MPP 和 Python/NumPy 整数保持支持。整数值浮点整数参数自 0.3.0 起也拒绝。
 旧 helper 的显式 level 已立即拒绝负数/bool/浮点/越界值，显式 level 不屏蔽非法 policy。
 
 ## 验收证据

@@ -23,7 +23,7 @@
 | A13 / R08,R10 | 输出/read 面积 limit-1、limit、limit+1；默认/None；bicubic 邻域，远距 reflect；NaN/Inf/bool、fraction/int-valued float 尺寸/level/limits，负 level、非法 policy，fill=(-1,2,3)；有限输入派生溢出 | 等于限额允许，超过拒绝；任何大数组分配/IO 前报错；plan 无像素 IO/HW 数组；消息字段/请求/选层/尺寸/上限；禁用单项独立生效 | P/S/F；1、3–4；待严格 API，禁止构造真实巨型输出来测试 |
 | A14 / R03,R04,R10 | RGB、2D/HWC 灰度、RGBA ([100,50,0,128])、uint16 灰度；非法双通道、float RGB；native 完全越界有/无 PixelFormat | 灰度复制；RGBA→[177,152,127] 后采样；uint16 RGB 报错；native uint16 nearest 保值、非 nearest 拒绝；未知完全越界 native 无像素 IO 且报错 | S/B/C；2–3、5；旧 native uint16 快照已保存，新增格式验证待 2 |
 | A15 / R09,R10 | 复用缓冲区 reader，读下一项覆盖 buffer；结束流及 reader.close 后再访问结果；修改返回 image | 之前 image/mask 保持不变且独立持有数据；修改结果不改变后续读取或其他结果；直接/串行/并行均验证 | S/F/B；2、4–5；待生产结果类型 |
-| A16 / R10 | Patch(request,image)、旧整数调用、round 默认、8 个 legacy 固定像素快照；旧分数/bool 构造；torch 默认 item | 旧整数 image/mask/dtype/IO次数逐项一致；0.2.0 FutureWarning 含字段、替代入口、0.3.0，0.3.0 拒绝；精确 API 首次发布即严格 | C；1–5；test_legacy_pixel_snapshot 当前 8 例；提示迁移待 1 |
+| A16 / R10 | Patch(request,image)、旧整数调用、round 默认、8 个 legacy 固定像素快照；旧分数/bool 构造；torch 默认 item | 旧整数 image/mask/dtype/IO次数逐项一致；0.3.0 拒绝旧分数/bool/浮点整数参数及 bool MPP，ValueError 含字段；精确 API 首次发布即严格 | C；1–5；test_legacy_pixel_snapshot 当前 8 例；test_legacy_deprecated_inputs_are_rejected、test_shared_size_rejects_deprecated_inputs、test_shared_mpp_rejects_bool 覆盖 0.3.0 拒绝行为 |
 
 ## 基线运行与维护
 
