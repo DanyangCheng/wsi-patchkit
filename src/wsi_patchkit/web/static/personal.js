@@ -5,6 +5,8 @@
   const states = { queued: "等待中", running: "裁剪中", completed: "已完成", failed: "失败", cancelled: "已取消" };
   let slides = [], jobs = [], crops = [], uploads = [], selected = new Set();
   let detail = null;
+  const panelScrollPositions = new Map();
+  let currentPanel = null;
   let detailSequence = 0, busyRefresh = false;
   const activeUploads = new Map();
   const uploadMessages = new Map();
@@ -63,7 +65,14 @@
   function activeTab() { return location.hash.slice(1) in names ? location.hash.slice(1) : "overview"; }
   function route() {
     const tab = activeTab(); $("#page-title").textContent = names[tab];
-    document.querySelectorAll("[data-panel]").forEach(n => { n.hidden = n.dataset.panel !== tab; });
+    if (currentPanel) panelScrollPositions.set(currentPanel.dataset.panel, currentPanel.scrollTop);
+    document.querySelectorAll("[data-panel]").forEach(n => {
+      n.hidden = n.dataset.panel !== tab;
+      n.tabIndex = 0;
+      n.setAttribute("aria-label", names[n.dataset.panel]);
+      if (!n.hidden) currentPanel = n;
+    });
+    currentPanel.scrollTop = panelScrollPositions.get(tab) || 0;
     document.querySelectorAll("[data-tab]").forEach(n => { n.classList.toggle("active", n.dataset.tab === tab); n.setAttribute("aria-current", n.dataset.tab === tab ? "page" : "false"); });
   }
   function renderOverview(data) {

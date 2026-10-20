@@ -3,8 +3,8 @@
 <head>
   <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
   <title>个人工作台 · WSI PatchKit</title>
-  <link rel="stylesheet" href="/static/personal.css">
-  <script src="/static/auth.js" defer></script><script src="/static/personal.js?v=2" defer></script>
+  <link rel="stylesheet" href="/static/personal.css?v=2">
+  <script src="/static/auth.js" defer></script><script src="/static/personal.js?v=3" defer></script>
 </head>
 <body>
 <header class="topbar">
@@ -32,15 +32,15 @@
     </section>
     <section data-panel="slides" hidden>
       <div class="tools"><input id="slide-search" type="search" placeholder="搜索名称、项目、标签和备注" aria-label="搜索切片"><select id="project-filter" aria-label="筛选项目"><option value="">所有项目</option></select><select id="slide-sort" aria-label="排序"><option value="newest">最新在前</option><option value="name">按名称</option><option value="size">按大小</option></select><a class="primary" href="#uploads">上传切片</a></div>
-      <p class="muted">个人上传和获授权的共享切片均显示在这里。分类、标签和备注保存在你的工作空间中。</p><div id="slide-grid" class="card-grid"></div>
+      <div id="slide-grid" class="card-grid"></div>
     </section>
     <section data-panel="uploads" hidden>
-      <div class="panel dropzone" id="dropzone"><span class="upload-icon">↑</span><h2>将切片拖到这里</h2><p>支持批量上传。中断后重新选择同一个文件，即可继续传输。</p><label class="primary file-picker">选择切片<input id="upload-files" type="file" multiple accept=".bif,.btf,.btiff,.kfb,.ndpi,.qptiff,.scn,.svs,.tif,.tiff,.png,.jpg,.jpeg,.bmp,.webp"></label><p id="upload-limit" class="muted"></p></div>
-      <div class="panel"><h2>上传队列</h2><p class="muted">暂停会保留已上传的数据。传输完成后会校验切片；同名同大小文件会提示复用已有上传。</p><div id="upload-list"></div></div>
+      <div class="panel dropzone" id="dropzone"><span class="upload-icon">↑</span><h2>将切片拖到这里</h2><p>支持批量上传，单文件断点续传。</p><label class="primary file-picker">选择切片<input id="upload-files" type="file" multiple accept=".bif,.btf,.btiff,.kfb,.ndpi,.qptiff,.scn,.svs,.tif,.tiff,.png,.jpg,.jpeg,.bmp,.webp"></label><p id="upload-limit" class="muted"></p></div>
+      <div class="panel"><h2>上传队列</h2><div id="upload-list"></div></div>
     </section>
-    <section data-panel="jobs" hidden><div class="tools"><select id="job-filter" aria-label="筛选任务状态"><option value="">所有状态</option><option value="queued">等待中</option><option value="running">裁剪中</option><option value="completed">已完成</option><option value="failed">失败</option><option value="cancelled">已取消</option></select><a href="/?crop=1" class="primary">新建裁剪任务</a></div><p class="muted">待执行任务可以取消；失败或取消的任务可以重试。服务重启后保留任务记录。</p><div id="job-list"></div></section>
+    <section data-panel="jobs" hidden><div class="tools"><select id="job-filter" aria-label="筛选任务状态"><option value="">所有状态</option><option value="queued">等待中</option><option value="running">裁剪中</option><option value="completed">已完成</option><option value="failed">失败</option><option value="cancelled">已取消</option></select><a href="/?crop=1" class="primary">新建裁剪任务</a></div><p class="muted">任务管理</p><div id="job-list"></div></section>
     <section data-panel="crops" hidden><div class="tools"><input id="crops-search" type="search" placeholder="搜索裁剪结果" aria-label="搜索裁剪结果"><label><input id="select-all" type="checkbox"> 全选当前结果</label><button id="download-crops">打包下载</button><button id="download-manifest" class="secondary">导出坐标清单</button><button id="delete-crops" class="danger">删除所选</button></div><p id="selection-count" class="muted"></p><div id="crops-grid" class="card-grid"></div></section>
-    <section data-panel="trash" hidden><div class="panel"><h2>切片回收站</h2><p class="muted">移入回收站后暂停切片访问，原文件和裁剪结果保留。恢复后可以继续查看。回收站中的文件仍占用存储空间。</p><div id="trash-list"></div></div></section>
+    <section data-panel="trash" hidden><div class="panel"><h2>切片回收站</h2><div id="trash-list"></div></div></section>
     <section data-panel="account" hidden>
       <div id="account-disabled" class="panel" hidden>当前服务未启用登录认证。启用账号认证后可管理个人资料和密码。</div>
       <div id="account-content"><div class="two-columns"><div class="panel"><h2>账号资料</h2><dl id="account-info"></dl><form id="profile-form"><label>显示名称<input name="display_name" maxlength="80" autocomplete="nickname"></label><label>个人备注<textarea name="notes" maxlength="1000" rows="3"></textarea></label><button type="submit" class="primary">保存资料</button><p id="profile-status" role="status"></p></form></div>
