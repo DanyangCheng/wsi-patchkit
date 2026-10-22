@@ -176,6 +176,7 @@
       body.append(label, node("h2", r.filename), node("p", `${bytes(r.size_bytes)} · ${date(r.modified_at)}`));
       const j = r.source?.slide_id ? r.source : null;
       const actions = node("div", undefined, "actions"); actions.append(link("下载", r.download_url));
+      if (r.export_url) actions.append(link("下载图像与标签", r.export_url));
       if (j) { body.append(node("p", `Level ${j.level} · (${j.region.x}, ${j.region.y}) · ${j.region.width} × ${j.region.height}`)); actions.append(link("定位来源", viewerLink(j.slide_id, j))); }
       else body.append(node("p", "历史图像：来源坐标未记录"));
       body.append(actions); c.append(image, body); return c;

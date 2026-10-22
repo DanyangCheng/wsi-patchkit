@@ -825,6 +825,7 @@
             ...cropRegion,
             level: Number(cropLevel.value),
             format: cropFormat.value,
+            ...(document.querySelector("#crop-masks")?.checked === false ? {overlay_ids: []} : {}),
             target_mpp: Number(document.querySelector("#crop-target-mpp")?.value || 0),
             filename: cropFilename.value.trim() || null,
           }),

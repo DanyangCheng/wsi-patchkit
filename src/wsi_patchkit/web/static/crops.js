@@ -119,7 +119,15 @@
     remove.disabled = deletingCrops;
     remove.textContent = "删除";
     remove.addEventListener("click", () => deleteCrops([crop.filename]));
-    actions.append(download, remove);
+    actions.append(download);
+    if (crop.export_url) {
+      const bundle = document.createElement("a");
+      bundle.className = "action-button";
+      bundle.href = crop.export_url;
+      bundle.textContent = "下载图像与标签";
+      actions.append(bundle);
+    }
+    actions.append(remove);
 
     content.append(titleRow, metadata, actions);
     card.append(previewLink, selectionLabel, content);

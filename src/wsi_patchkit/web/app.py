@@ -42,6 +42,7 @@ from .access import FileAccess, namespace, private_directory
 from .auth import AdminAuth, install_auth
 from .crops import CropJobQueue, crop_output
 from .detections import DetectionOverlay, bounds
+from .exporters import CropBundle, ExporterRegistry
 from .overlays import RGBA, IndexedOverlay, OverlayRegistry, OverlayRenderer
 from .personal_store import PersonalStore
 from .registry import SlideRegistry, SlideSource, valid_public_id
@@ -359,6 +360,11 @@ def create_app(
         else crop_directory.parent / ".workbench" / f"{crop_directory.name}.sqlite3"
     )
     personal_store = PersonalStore(personal_database)
+    overlay_renderer = OverlayRenderer(
+        reader_pool_size=reader_pool_size,
+        cache_size=cache_size,
+        max_output_pixels=max_output_pixels,
+    )
     crop_jobs = CropJobQueue(
         renderer,
         crop_directory,
@@ -366,12 +372,9 @@ def create_app(
         store=personal_store,
         history_days=crop_history_days,
         history_limit=crop_history_limit,
+        overlay_renderer=overlay_renderer,
     )
-    overlay_renderer = OverlayRenderer(
-        reader_pool_size=reader_pool_size,
-        cache_size=cache_size,
-        max_output_pixels=max_output_pixels,
-    )
+    exporters = ExporterRegistry()
 
     @asynccontextmanager
     async def lifespan(_: FastAPI):
@@ -412,6 +415,7 @@ def create_app(
     app.state.overlay_workers = overlay_workers
     app.state.crop_output_dir = crop_directory
     app.state.crop_jobs = crop_jobs
+    app.state.crop_exporters = exporters
     app.state.upload_dir = upload_directory
     with personal_store.lock:
         app.state.trashed_slides = {
@@ -580,7 +584,10 @@ def create_app(
         return filenames
 
     def create_crop_archive(
-        filenames: list[str], owner: str | None = None, include_manifest: bool = False
+        filenames: list[str],
+        owner: str | None = None,
+        include_manifest: bool = False,
+        label_format: str = "indexed-png",
     ) -> str:
         descriptor, archive_name = tempfile.mkstemp(
             prefix=".crop-download-",
@@ -591,7 +598,12 @@ def create_app(
         try:
             with ZipFile(archive_name, "w", compression=ZIP_STORED) as archive:
                 for filename in filenames:
-                    archive.write(saved_crop_path(filename, owner), arcname=filename)
+                    image = saved_crop_path(filename, owner)
+                    archive.write(image, arcname=filename)
+                    exporters.get(label_format)(
+                        CropBundle(image, image.with_name(filename + ".labels")),
+                        archive,
+                    )
                 if include_manifest:
                     records = crop_jobs.provenance_for(filenames, owner)
                     archive.writestr(
@@ -610,6 +622,10 @@ def create_app(
             Path(archive_name).unlink(missing_ok=True)
             raise
         return archive_name
+
+    @app.get("/api/crops/exporters")
+    def crop_exporters():
+        return exporters.public()
 
     @app.get("/api/crops", name="list_crops")
     def list_crops(request: Request) -> list[dict[str, object]]:
@@ -641,6 +657,7 @@ def create_app(
                     "image_url": f"/api/crops/{encoded_name}/image",
                     "thumbnail_url": f"/api/crops/{encoded_name}/thumbnail",
                     "download_url": f"/api/crops/{encoded_name}/download",
+                    "export_url": f"/api/crops/{encoded_name}/export",
                 }
             )
         records.sort(key=lambda record: str(record["modified_at"]), reverse=True)
@@ -688,6 +705,26 @@ def create_app(
             headers={"Cache-Control": "private, no-store"},
         )
 
+    @app.get("/api/crops/{filename}/export")
+    async def export_crop(
+        filename: str, request: Request, label_format: str = "indexed-png"
+    ):
+        saved_crop_path(filename, namespace(request))
+        try:
+            exporters.get(label_format)
+        except ValueError as error:
+            raise HTTPException(400, str(error)) from error
+        archive_name = await asyncio.to_thread(
+            create_crop_archive, [filename], namespace(request), True, label_format
+        )
+        return FileResponse(
+            archive_name,
+            media_type="application/zip",
+            filename=filename + ".zip",
+            headers={"Cache-Control": "private, no-store"},
+            background=BackgroundTask(os.unlink, archive_name),
+        )
+
     @app.post("/api/crops/batch-download", name="download_crops")
     async def download_crops(request: Request) -> FileResponse:
         content_type = request.headers.get("content-type", "").split(";", 1)[0]
@@ -697,7 +734,10 @@ def create_app(
                 encoded_filenames = form.get("filenames", [])
                 if len(encoded_filenames) != 1:
                     raise ValueError("filenames field is required")
-                payload = {"filenames": json.loads(encoded_filenames[0])}
+                payload = {
+                    "filenames": json.loads(encoded_filenames[0]),
+                    "label_format": form.get("label_format", ["indexed-png"])[0],
+                }
             elif content_type == "application/json":
                 payload = await request.json()
             else:
@@ -710,11 +750,17 @@ def create_app(
         if not isinstance(payload, Mapping):
             raise HTTPException(status_code=400, detail="invalid crop download request")
         filenames = crop_filenames(payload, namespace(request))
+        label_format = payload.get("label_format", "indexed-png")
+        try:
+            exporters.get(label_format)
+        except ValueError as error:
+            raise HTTPException(400, str(error)) from error
         archive_name = await asyncio.to_thread(
             create_crop_archive,
             filenames,
             namespace(request),
             payload.get("include_manifest") is True,
+            label_format,
         )
         return FileResponse(
             archive_name,
@@ -982,6 +1028,29 @@ def create_app(
                 image_format = "jpg"
             if image_format not in ("png", "jpg"):
                 raise ValueError("format must be png or jpg")
+            available = overlay_registry.for_slide(slide_id)
+            overlay_ids = payload.get("overlay_ids")
+            if overlay_ids is None:
+                overlay_ids = [
+                    key
+                    for key, overlay in available.items()
+                    if isinstance(overlay, IndexedOverlay)
+                ]
+            if not isinstance(overlay_ids, list) or any(
+                not isinstance(key, str) for key in overlay_ids
+            ):
+                raise ValueError("overlay_ids must be a list of indexed overlay IDs")
+            selected_overlays = []
+            for key in dict.fromkeys(overlay_ids):
+                overlay = available.get(key)
+                if not isinstance(overlay, IndexedOverlay):
+                    raise ValueError("unknown indexed overlay")
+                overlay.validate_slide(metadata)
+                if max(item.id for item in overlay.classes) > 65535:
+                    raise ValueError("PNG indexed masks require class IDs <= 65535")
+                selected_overlays.append(overlay)
+            if selected_overlays and image_format != "png":
+                raise ValueError("带掩码的裁剪请选择 PNG 格式")
             filename = _crop_filename(
                 payload,
                 slide_id=slide_id,
@@ -1000,6 +1069,7 @@ def create_app(
                 filename=filename,
                 namespace=namespace(request),
                 target_mpp=target_mpp,
+                overlays=tuple(selected_overlays),
                 provenance={
                     "source_mpp": metadata.mpp,
                     "output_mpp": [target_mpp, target_mpp]
@@ -1278,8 +1348,6 @@ def create_app(
     install_personal(
         app,
         store=personal_store,
-        history_days=crop_history_days,
-        history_limit=crop_history_limit,
         registry=registry,
         uploaded_sources=uploaded_sources,
         upload_directory=upload_directory,

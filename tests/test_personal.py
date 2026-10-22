@@ -247,7 +247,10 @@ async def test_grid_exports_provenance_and_recycle_restore_across_restart(
         )
         assert archive.status_code == 200
         with ZipFile(BytesIO(archive.content)) as z:
-            assert set(z.namelist()) == {*filenames, "manifest.json"}
+            assert set(z.namelist()) == {
+                *filenames, "manifest.json",
+                *(name + ".labels/metadata.json" for name in filenames),
+            }
             records = json.loads(z.read("manifest.json"))
             assert records["coordinate_system"] == "selected_native_level_pixels"
             assert len(records["crops"]) == 4

@@ -357,6 +357,9 @@ is cleaned.
 The viewer panel displays current-slide tasks and supports cancelling queued jobs
 and retrying failures. Open **个人管理 → 裁剪管理** to browse saved crops, download
 images and coordinate metadata, or delete selections.
+PNG crops also save aligned class-index masks, coverage and metadata for registered
+indexed overlays. Download image-and-label bundles or register additional label
+exporters; see the [crop label export guide](docs/CROP_LABEL_EXPORT.md).
 
 Applications can embed the viewer server instead of using the CLI:
 

@@ -3,6 +3,7 @@
 from .app import create_app
 from .crops import CropJobQueue
 from .detections import DetectionOverlay, load_detection_overlay_manifest
+from .exporters import CropBundle, ExporterRegistry
 from .overlays import (
     BinaryRasterSource,
     IndexedOverlay,
@@ -23,6 +24,8 @@ __all__ = [
     "load_detection_overlay_manifest",
     "load_overlay_manifest",
     "CropJobQueue",
+    "CropBundle",
+    "ExporterRegistry",
     "BinaryRasterSource",
     "IndexedOverlay",
     "OverlayClass",

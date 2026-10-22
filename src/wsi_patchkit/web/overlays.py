@@ -553,6 +553,29 @@ class OverlayRenderer:
         output_size: tuple[int, int],
         palette_override: Mapping[int, RGBA] | None = None,
     ) -> NDArray[np.uint8]:
+        indices, coverage = self.sample_region(overlay, slide_mpp, region, output_size)
+        palette = np.zeros(
+            (max(item.id for item in overlay.classes) + 1, 4), dtype=np.uint8
+        )
+        for item in overlay.classes:
+            palette[item.id] = (
+                palette_override[item.id] if palette_override is not None else item.rgba
+            )
+        result = palette[indices]
+        result[~coverage, 3] = 0
+        return result
+
+    def sample_region(self, overlay, slide_mpp, region, output_size):
+        """Return nearest-sampled class IDs and validity on a level-0 pixel grid.
+
+        Region edges may be fractional, allowing native-level pixel spacing to
+        remain exact. Uncovered pixels have index zero and coverage false.
+        """
+        if (
+            min(output_size) < 1
+            or output_size[0] * output_size[1] > self.max_output_pixels
+        ):
+            raise ValueError("invalid mask output size")
         x, y, width, height = region
         output_width, output_height = output_size
         x_centres = (
@@ -564,14 +587,12 @@ class OverlayRenderer:
             * height
             / output_height
         ) * slide_mpp[1]
-        result = np.zeros((output_height, output_width, 4), dtype=np.uint8)
+        dtype = np.min_scalar_type(max(item.id for item in overlay.classes))
+        result = np.zeros((output_height, output_width), dtype=dtype)
+        valid = np.zeros((output_height, output_width), dtype=bool)
         max_id = max(item.id for item in overlay.classes)
-        palette = np.zeros((max_id + 1, 4), dtype=np.uint8)
         known = np.zeros(max_id + 1, dtype=bool)
         for item in overlay.classes:
-            palette[item.id] = (
-                palette_override[item.id] if palette_override is not None else item.rgba
-            )
             known[item.id] = True
 
         with self._readers.acquire() as reader:
@@ -628,12 +649,12 @@ class OverlayRenderer:
                     raise ValueError(
                         f"prediction contains undeclared class IDs: {values}"
                     )
-                colored = palette[safe]
-                colored = colored.copy()
-                if coverage is not None:
-                    colored[~coverage, 3] = 0
-                result[np.ix_(output_y, output_x)] = colored
-        return result
+                covered = (
+                    np.ones(sampled.shape, dtype=bool) if coverage is None else coverage
+                )
+                result[np.ix_(output_y, output_x)] = np.where(covered, sampled, 0)
+                valid[np.ix_(output_y, output_x)] = covered
+        return result, valid
 
     @staticmethod
     def _read_sampled(

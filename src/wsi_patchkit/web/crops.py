@@ -5,7 +5,10 @@ from __future__ import annotations
 import json
 import logging
 import math
+import os
 import queue
+import shutil
+import tempfile
 import threading
 import time
 import uuid
@@ -13,8 +16,11 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
 
+from PIL import Image
+
 from ..tiles import ImageFormat, TileRenderer
 from ..types import SlideMetadata
+from .overlays import IndexedOverlay, OverlayRenderer
 from .personal_store import PersonalStore
 from .registry import SlideSource
 
@@ -62,6 +68,7 @@ class _CropJob:
     error: str | None = None
     provenance: dict | None = None
     target_mpp: float | None = None
+    overlays: tuple[IndexedOverlay, ...] = ()
 
     def public(self) -> dict[str, object]:
         x, y, width, height = self.region
@@ -72,6 +79,7 @@ class _CropJob:
             "filename": self.filename,
             "format": self.image_format,
             "level": self.level,
+            "overlay_ids": [overlay.overlay_id for overlay in self.overlays],
             "region": {"x": x, "y": y, "width": width, "height": height},
         }
         if self.error is not None:
@@ -93,11 +101,13 @@ class CropJobQueue:
         store: PersonalStore | None = None,
         history_days: int = 90,
         history_limit: int = 5000,
+        overlay_renderer: OverlayRenderer | None = None,
     ) -> None:
         if worker_count < 1:
             raise ValueError("crop worker count must be positive")
         if history_days < 1 or history_limit < 1:
             raise ValueError("crop history limits must be positive")
+        self._overlay_renderer = overlay_renderer
         self._renderer = renderer
         self._store = store
         self._history_days = history_days
@@ -172,6 +182,7 @@ class CropJobQueue:
         namespace: str | None = None,
         provenance: dict | None = None,
         target_mpp: float | None = None,
+        overlays: tuple[IndexedOverlay, ...] = (),
     ) -> dict[str, object]:
         job = _CropJob(
             uuid.uuid4().hex,
@@ -184,13 +195,16 @@ class CropJobQueue:
             namespace=namespace,
             provenance=provenance,
             target_mpp=target_mpp,
+            overlays=overlays,
         )
         with self._lock:
             if self._closed:
                 raise RuntimeError("crop queue is closed")
-            if (namespace, filename) in self._reserved_filenames or (
-                self._directory(namespace) / filename
-            ).exists():
+            if (
+                (namespace, filename) in self._reserved_filenames
+                or (self._directory(namespace) / filename).exists()
+                or (self._directory(namespace) / (filename + ".labels")).exists()
+            ):
                 raise FileExistsError(filename)
             self._jobs[job.job_id] = job
             self._reserved_filenames.add((namespace, filename))
@@ -278,6 +292,11 @@ class CropJobQueue:
             if any(path.is_symlink() or not path.is_file() for path in paths):
                 raise FileNotFoundError("one or more crops do not exist")
             for path in paths:
+                labels = path.with_name(path.name + ".labels")
+                if labels.is_symlink():
+                    raise ValueError("invalid crop bundle")
+                if labels.is_dir():
+                    shutil.rmtree(labels)
                 path.unlink()
                 if self._store:
                     self._store.delete(namespace or "local", "crop", path.name)
@@ -346,8 +365,89 @@ class CropJobQueue:
         directory = self._directory(job.namespace)
         directory.mkdir(parents=True, exist_ok=True)
         destination = directory / job.filename
-        with destination.open("xb") as output:
-            output.write(encoded.content)
+        labels = directory / (job.filename + ".labels")
+        # Stage all artifacts first. Publish the image last: it is the result
+        # library's completion marker. Roll back only files owned by this job.
+        with tempfile.TemporaryDirectory(prefix=".crop-", dir=directory) as temporary:
+            staged_image = Path(temporary) / "image"
+            staged_image.write_bytes(encoded.content)
+            staging = Path(temporary) / "labels"
+            staging.mkdir()
+            metadata = self._renderer.metadata(
+                job.source.path, source_mpp=job.source.source_mpp
+            )
+            size = (encoded.width, encoded.height)
+            if job.target_mpp is None:
+                x, y, width, height = job.region
+                dx, dy = metadata.levels[job.level].downsample
+                base_region = (round(x * dx), round(y * dy), width * dx, height * dy)
+            else:
+                _, _, base_region = crop_output(
+                    metadata, job.region, job.level, job.target_mpp
+                )
+            x, y, width, height = base_region
+            record = {
+                "schema": "wsi-patchkit-crop/v1",
+                "slide_id": job.slide_id,
+                "image": job.filename,
+                "level": job.level,
+                "region": dict(
+                    zip(("x", "y", "width", "height"), job.region, strict=True)
+                ),
+                "region_level0": list(base_region),
+                "output_dimensions": list(size),
+                "source_mpp": metadata.mpp,
+                "output_mpp": [
+                    width * metadata.mpp[0] / size[0],
+                    height * metadata.mpp[1] / size[1],
+                ]
+                if metadata.mpp
+                else None,
+                "pixel_convention": "half-open edges; sample at pixel centers",
+                "overlays": [],
+            }
+            for index, overlay in enumerate(job.overlays):
+                if self._overlay_renderer is None:
+                    raise RuntimeError("mask renderer is unavailable")
+                overlay.validate_slide(metadata)
+                revision = overlay.cache_token
+                indices, coverage = self._overlay_renderer.sample_region(
+                    overlay, metadata.mpp, base_region, size
+                )
+                if overlay.cache_token != revision:
+                    raise ValueError("overlay changed during crop")
+                layer = staging / f"layer-{index}"
+                layer.mkdir()
+                Image.fromarray(indices).save(layer / "mask.png")
+                Image.fromarray(coverage.astype("uint8")).save(layer / "coverage.png")
+                record["overlays"].append(
+                    {
+                        "id": overlay.overlay_id,
+                        "revision": revision,
+                        "classes": overlay.public_metadata()["classes"],
+                        "mask": f"layer-{index}/mask.png",
+                        "coverage": f"layer-{index}/coverage.png",
+                        "coverage_values": {"0": "unpredicted", "1": "predicted"},
+                    }
+                )
+            (staging / "metadata.json").write_text(
+                json.dumps(record, ensure_ascii=False, indent=2), encoding="utf-8"
+            )
+            published = False
+            image_created = False
+            try:
+                if labels.exists() or labels.is_symlink():
+                    raise FileExistsError(labels)
+                staging.rename(labels)
+                published = True
+                os.link(staged_image, destination)
+                image_created = True
+            except BaseException:
+                if image_created:
+                    destination.unlink(missing_ok=True)
+                if published:
+                    shutil.rmtree(labels)
+                raise
 
     def _finish(
         self,
