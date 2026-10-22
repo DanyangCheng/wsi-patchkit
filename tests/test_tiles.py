@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import math
 import threading
 import time
 from io import BytesIO
 from pathlib import Path
 
 import numpy as np
+import pytest
 from PIL import Image
 
 from wsi_patchkit import (
@@ -234,3 +236,48 @@ def test_tile_renderer_coalesces_concurrent_identical_tiles(tmp_path: Path) -> N
     assert len(results) == 3
     assert results[0] is results[1] is results[2]
     renderer.close()
+
+
+@pytest.mark.parametrize("max_read_pixels", [16, 1000])
+def test_fractional_pyramid_render_uses_correct_native_origin(
+    tmp_path, max_read_pixels
+):
+    class FractionalReader:
+        def metadata(self, path, *, source_mpp=None):
+            return SlideMetadata(
+                path,
+                (
+                    LevelInfo(0, (30, 30), (1, 1)),
+                    LevelInfo(1, (9, 9), (10 / 3, 10 / 3)),
+                ),
+            )
+
+        def read_region(self, path, location, level, size):
+            assert level == 1
+            x, y = (math.floor(value / (10 / 3)) for value in location)
+            return native[y : y + size[1], x : x + size[0]]
+
+        def close(self):
+            pass
+
+    (tmp_path / "slide.tif").touch()
+    native = np.zeros((9, 9, 3), dtype="uint8")
+    native[..., 0] = np.arange(9, dtype="uint8") * 20
+    native[..., 1] = np.arange(9, dtype="uint8")[:, None] * 20
+    renderer = TileRenderer(FractionalReader(), max_read_pixels=max_read_pixels)
+    try:
+        encoded = renderer.render_region(
+            tmp_path / "slide.tif", (14, 14, 14, 14), (4, 4), image_format="png"
+        )
+        with Image.open(BytesIO(encoded.content)) as image:
+            actual = np.array(image)
+        expected = Image.fromarray(native).transform(
+            (4, 4),
+            Image.Transform.EXTENT,
+            (4.2, 4.2, 8.4, 8.4),
+            resample=Image.Resampling.BILINEAR,
+        )
+        # Local floating-point extents can differ by one quantization value.
+        np.testing.assert_allclose(actual, np.array(expected), atol=1, rtol=0)
+    finally:
+        renderer.close()

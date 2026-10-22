@@ -16,6 +16,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
 
+import numpy as np
 from PIL import Image
 
 from ..tiles import ImageFormat, TileRenderer
@@ -69,6 +70,7 @@ class _CropJob:
     provenance: dict | None = None
     target_mpp: float | None = None
     overlays: tuple[IndexedOverlay, ...] = ()
+    overlay_class_ids: dict[str, list[int]] | None = None
 
     def public(self) -> dict[str, object]:
         x, y, width, height = self.region
@@ -82,6 +84,8 @@ class _CropJob:
             "overlay_ids": [overlay.overlay_id for overlay in self.overlays],
             "region": {"x": x, "y": y, "width": width, "height": height},
         }
+        if self.overlay_class_ids is not None:
+            result["overlay_class_ids"] = self.overlay_class_ids
         if self.error is not None:
             result["error"] = self.error
         if self.target_mpp is not None:
@@ -183,6 +187,7 @@ class CropJobQueue:
         provenance: dict | None = None,
         target_mpp: float | None = None,
         overlays: tuple[IndexedOverlay, ...] = (),
+        overlay_class_ids: dict[str, list[int]] | None = None,
     ) -> dict[str, object]:
         job = _CropJob(
             uuid.uuid4().hex,
@@ -196,6 +201,7 @@ class CropJobQueue:
             provenance=provenance,
             target_mpp=target_mpp,
             overlays=overlays,
+            overlay_class_ids=overlay_class_ids,
         )
         with self._lock:
             if self._closed:
@@ -380,7 +386,7 @@ class CropJobQueue:
             if job.target_mpp is None:
                 x, y, width, height = job.region
                 dx, dy = metadata.levels[job.level].downsample
-                base_region = (round(x * dx), round(y * dy), width * dx, height * dy)
+                base_region = (x * dx, y * dy, width * dx, height * dy)
             else:
                 _, _, base_region = crop_output(
                     metadata, job.region, job.level, job.target_mpp
@@ -404,6 +410,7 @@ class CropJobQueue:
                 if metadata.mpp
                 else None,
                 "pixel_convention": "half-open edges; sample at pixel centers",
+                "overlay_class_ids": job.overlay_class_ids,
                 "overlays": [],
             }
             for index, overlay in enumerate(job.overlays):
@@ -416,6 +423,10 @@ class CropJobQueue:
                 )
                 if overlay.cache_token != revision:
                     raise ValueError("overlay changed during crop")
+                selected_ids = (job.overlay_class_ids or {}).get(overlay.overlay_id)
+                if selected_ids is not None:
+                    coverage = coverage & np.isin(indices, selected_ids)
+                    indices = np.where(coverage, indices, 0).astype(indices.dtype)
                 layer = staging / f"layer-{index}"
                 layer.mkdir()
                 Image.fromarray(indices).save(layer / "mask.png")
@@ -427,7 +438,15 @@ class CropJobQueue:
                         "classes": overlay.public_metadata()["classes"],
                         "mask": f"layer-{index}/mask.png",
                         "coverage": f"layer-{index}/coverage.png",
-                        "coverage_values": {"0": "unpredicted", "1": "predicted"},
+                        "selected_class_ids": selected_ids,
+                        "coverage_values": {
+                            "0": "unpredicted_or_unselected"
+                            if selected_ids is not None
+                            else "unpredicted",
+                            "1": "selected_prediction"
+                            if selected_ids is not None
+                            else "predicted",
+                        },
                     }
                 )
             (staging / "metadata.json").write_text(

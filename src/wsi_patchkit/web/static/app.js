@@ -51,6 +51,7 @@
   let cropActive = false;
   let cropOverlayAdded = false;
   let overlayItems = new Map();
+  let overlayControls = new Map();
   const detectionItems = new Map();
   let detectionTimer = null;
 
@@ -336,6 +337,7 @@
 
   function populateOverlayControls() {
     overlayItems = new Map();
+    overlayControls = new Map();
     const overlays = currentSlide?.overlays || [];
     overlayTool.disabled = overlays.length === 0;
     if (!overlays.length) overlayPanel.hidden = true;
@@ -372,6 +374,7 @@
         visible: item.rgba[3] > 0,
         checkbox: null,
       }));
+      overlayControls.set(record.id, {record, checkbox, opacity, classSettings});
       const styleValue = () => classSettings.map(({ color, alpha, visible }) =>
         [...color, visible ? alpha : 0]
           .map((channel) => channel.toString(16).padStart(2, "0"))
@@ -810,6 +813,18 @@
     setCropStatus("");
   }
 
+  function cropMaskSelection() {
+    if (document.querySelector("#crop-masks")?.checked === false) return {overlay_ids: []};
+    if (document.querySelector("#crop-mask-mode")?.value !== "visible") return {};
+    const selected = [];
+    for (const [id, controls] of overlayControls) {
+      if (controls.record.encoding !== "indexed" || !controls.checkbox.checked || Number(controls.opacity.value) <= 0) continue;
+      const ids = controls.classSettings.filter(setting => setting.visible && setting.alpha > 0).map(setting => setting.item.id);
+      if (ids.length) selected.push([id, ids]);
+    }
+    return {overlay_ids: selected.map(([id]) => id), overlay_class_ids: Object.fromEntries(selected)};
+  }
+
   async function saveCrop() {
     if (!currentSlide || !cropActive) return;
     if (window.patchkitCrop?.incomplete) { setCropStatus("请先完成选区", "error"); return; }
@@ -825,7 +840,7 @@
             ...cropRegion,
             level: Number(cropLevel.value),
             format: cropFormat.value,
-            ...(document.querySelector("#crop-masks")?.checked === false ? {overlay_ids: []} : {}),
+            ...cropMaskSelection(),
             target_mpp: Number(document.querySelector("#crop-target-mpp")?.value || 0),
             filename: cropFilename.value.trim() || null,
           }),

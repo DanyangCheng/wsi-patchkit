@@ -21,6 +21,7 @@ import numpy as np
 from numpy.typing import NDArray
 from PIL import Image
 
+from .geometry import native_to_level_zero
 from .io._color import image_to_rgb
 from .io.base import SlideReader
 from .types import MPP, LevelInfo, SlideMetadata, as_mpp
@@ -368,8 +369,8 @@ class TileRenderer:
         if width * height > self.max_output_pixels:
             raise ValueError("requested output exceeds max_output_pixels")
         level_zero_location = (
-            round(x * level_info.downsample[0]),
-            round(y * level_info.downsample[1]),
+            native_to_level_zero(x, level_info.downsample[0]),
+            native_to_level_zero(y, level_info.downsample[1]),
         )
         with self._readers.acquire() as reader:
             array = reader.read_region(
@@ -423,8 +424,8 @@ class TileRenderer:
             math.ceil((y + clipped_height) / level.downsample[1]),
         )
         level_zero_location = (
-            round(lx0 * level.downsample[0]),
-            round(ly0 * level.downsample[1]),
+            native_to_level_zero(lx0, level.downsample[0]),
+            native_to_level_zero(ly0, level.downsample[1]),
         )
         if (lx1 - lx0) * (ly1 - ly0) > self.max_read_pixels:
             image = self._render_in_blocks(
@@ -540,8 +541,8 @@ class TileRenderer:
                         ),
                     )
                     location = (
-                        round(rx0 * level.downsample[0]),
-                        round(ry0 * level.downsample[1]),
+                        native_to_level_zero(rx0, level.downsample[0]),
+                        native_to_level_zero(ry0, level.downsample[1]),
                     )
                     size = (rx1 - rx0, ry1 - ry0)
                     _LOGGER.debug(

@@ -588,7 +588,7 @@ main {
   font-size: 11px;
 }
 
-.crop-fields input,
+.crop-fields input:not([type="checkbox"]),
 .crop-fields select {
   width: 100%;
   height: 34px;
@@ -600,6 +600,25 @@ main {
   color: #edf2f8;
   font: inherit;
   font-size: 12px;
+}
+
+/* Keep the checkbox beside its text and align with the adjacent select. */
+.crop-fields .crop-mask-toggle {
+  display: flex;
+  align-items: center;
+  align-self: end;
+  gap: 7px;
+  min-height: 34px;
+  line-height: 1.4;
+  cursor: pointer;
+}
+
+.crop-mask-toggle input[type="checkbox"] {
+  flex: 0 0 auto;
+  width: 16px;
+  height: 16px;
+  margin: 0;
+  accent-color: #6be2c5;
 }
 
 .crop-fields .crop-filename {

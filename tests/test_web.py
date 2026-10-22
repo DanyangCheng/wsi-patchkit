@@ -519,8 +519,8 @@ async def test_viewer_serves_metadata_tiles_and_frontend(tmp_path: Path) -> None
     assert cached.status_code == 304
     assert index.status_code == 200
     assert "WSI PatchKit Viewer" in index.text
-    assert "/static/styles.css?v=15" in index.text
-    assert "/static/app.js?v=22" in index.text
+    assert "/static/styles.css?v=16" in index.text
+    assert "/static/app.js?v=23" in index.text
     assert "/static/viewer-crops.js?v=2" in index.text
     assert 'href="/personal"' in index.text
     assert 'href="/crops"' not in index.text

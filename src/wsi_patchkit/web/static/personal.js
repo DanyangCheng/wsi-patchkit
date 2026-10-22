@@ -176,7 +176,7 @@
       body.append(label, node("h2", r.filename), node("p", `${bytes(r.size_bytes)} · ${date(r.modified_at)}`));
       const j = r.source?.slide_id ? r.source : null;
       const actions = node("div", undefined, "actions"); actions.append(link("下载", r.download_url));
-      if (r.export_url) actions.append(link("下载图像与标签", r.export_url));
+      if (r.export_url) actions.append(link("下载图像与标签", window.patchkitExports.url(r.export_url)));
       if (j) { body.append(node("p", `Level ${j.level} · (${j.region.x}, ${j.region.y}) · ${j.region.width} × ${j.region.height}`)); actions.append(link("定位来源", viewerLink(j.slide_id, j))); }
       else body.append(node("p", "历史图像：来源坐标未记录"));
       body.append(actions); c.append(image, body); return c;
@@ -295,7 +295,7 @@
   $("#jobs-previous").addEventListener("click", () => run(() => loadJobsPage(jobPrevious[jobPrevious.length - 1], jobPrevious.slice(0, -1))));
   $("#crops-search").addEventListener("input", renderCrops);
   $("#select-all").addEventListener("change", e => { for (const r of visibleCrops()) e.target.checked ? selected.add(r.filename) : selected.delete(r.filename); renderCrops(); });
-  $("#download-crops").addEventListener("click", () => run(async () => { await downloadResponse(await fetch("/api/crops/batch-download", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ filenames: [...selected], include_manifest: true }) }), "wsi-patchkit-crops.zip"); }));
+  $("#download-crops").addEventListener("click", () => run(async () => { await downloadResponse(await fetch("/api/crops/batch-download", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ filenames: [...selected], include_manifest: true, label_format: window.patchkitExports.format() }) }), "wsi-patchkit-crops.zip"); }));
   $("#download-manifest").addEventListener("click", () => run(async () => {
     const manifest = await api("/api/personal/manifest");
     if (selected.size) manifest.crops = manifest.crops.filter(j => selected.has(j.filename));
@@ -336,6 +336,6 @@
     finally { button.disabled = false; }
   }, "#password-status"); });
   $("#logout-all").addEventListener("click", () => run(async () => { if (!confirm("退出所有设备上的登录会话？")) return; await api("/api/auth/logout-all", "POST"); location.replace("/login"); }));
-  route(); run(async () => { await Promise.all([refresh(), loadAccount()]); });
+  route(); run(async () => { await Promise.all([refresh(), loadAccount(), window.patchkitExports.load(renderCrops)]); });
   setInterval(() => { if (!document.hidden && !activeUploads.size && !$("#slide-dialog").open && ["overview", "jobs"].includes(activeTab())) run(refresh); }, 5000);
 })();

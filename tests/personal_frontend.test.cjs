@@ -54,6 +54,7 @@ function screen({ jobRecords = [], source = null } = {}) {
     filename, source, size_bytes: 100, modified_at: "2026-10-19T00:00:00Z",
     image_url: `/api/crops/${filename}/image`,
     download_url: `/api/crops/${filename}/download`,
+    export_url: `/api/crops/${filename}/export`,
   }));
   const body = new Element("body");
   const document = {
@@ -92,6 +93,7 @@ function screen({ jobRecords = [], source = null } = {}) {
       }
       const data = {
         "/api/crops": crops,
+        "/api/crops/exporters": [{id: "indexed-png", name: "类别索引 PNG"}, {id: "custom", name: "Custom"}],
         "/api/personal/slides": [], "/api/personal/jobs": [],
         "/api/personal/trash": [], "/api/personal/uploads": [],
         "/api/personal/account": { enabled: false },
@@ -105,6 +107,7 @@ function screen({ jobRecords = [], source = null } = {}) {
       return Response.json(data[endpoint]);
     },
   };
+  vm.runInNewContext(fs.readFileSync(path.join(staticDir, "crop-exports.js"), "utf8"), sandbox);
   vm.runInNewContext(script, sandbox);
   return { controls, panels, downloads, requests };
 }
@@ -130,7 +133,7 @@ test("crop management initializes, filters, downloads and deletes selected crops
   assert.match(get("#selection-count").textContent, /已选 1 张/);
   await get("#download-crops").dispatch("click");
   const download = page.requests.find(r => r.endpoint === "/api/crops/batch-download");
-  assert.deepEqual(JSON.parse(download.options.body), { filenames: ["alpha.png"], include_manifest: true });
+  assert.deepEqual(JSON.parse(download.options.body), { filenames: ["alpha.png"], include_manifest: true, label_format: "indexed-png" });
   assert.equal(page.downloads[0].filename, "wsi-patchkit-crops.zip");
 
   get("#crops-search").value = "";
@@ -170,4 +173,21 @@ test("crop source links remain available without their task history", async () =
   const grid = page.controls.get("#crops-grid");
   assert.match(grid.textContent, /定位来源/);
   assert.doesNotMatch(grid.textContent, /来源坐标未记录/);
+});
+
+
+test("registered label formats are selectable for bundle downloads", async () => {
+  const page = screen(), get = selector => page.controls.get(selector);
+  await settle();
+  assert.deepEqual(get("#crop-label-format").options.map(o => o.value), ["indexed-png", "custom"]);
+  get("#crop-label-format").value = "custom";
+  await get("#crop-label-format").dispatch("change");
+  const card = get("#crops-grid").children[0];
+  const actions = card.children.find(c => c.className === "card-body").children.find(c => c.className === "actions");
+  assert.equal(actions.children.find(c => c.textContent === "下载图像与标签").href, "/api/crops/alpha.png/export?label_format=custom");
+  get("#select-all").checked = true;
+  await get("#select-all").dispatch("change");
+  await get("#download-crops").dispatch("click");
+  const request = page.requests.find(r => r.endpoint === "/api/crops/batch-download");
+  assert.equal(JSON.parse(request.options.body).label_format, "custom");
 });

@@ -298,6 +298,7 @@ def install_personal(
                 "format": job["format"],
                 "target_mpp": job.get("target_mpp", 0),
                 "overlay_ids": job.get("overlay_ids", []),
+                "overlay_class_ids": job.get("overlay_class_ids"),
             },
             request,
         )

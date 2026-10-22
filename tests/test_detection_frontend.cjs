@@ -64,6 +64,7 @@ let source = fs.readFileSync('src/wsi_patchkit/web/static/app.js', 'utf8');
 source = source.replace('window.addEventListener("DOMContentLoaded", initialize);', `
   globalThis.testAPI = {
     setup(v,s) { viewer=v; currentSlide=s; populateOverlayControls(); },
+    controls: () => overlayControls, maskSelection: cropMaskSelection,
     entries: detectionItems, drawDetections, updateDetections, fetchDetections, clearDetections
   };
 `);
@@ -132,5 +133,28 @@ const api = sandbox.testAPI;
   api.clearDetections();
   assert.ok(entry.canvas.removed);
   assert.equal(api.entries.size, 0);
-  console.log('Detection controls, rendering, pagination and cancellation passed.');
+  const prediction = {id: 'prediction', encoding: 'indexed', initially_visible: true, default_opacity: 0.7,
+    classes: [{id: 0, name: 'Normal', rgba: [0, 0, 0, 0]}, {id: 300, name: 'Tumor', rgba: [255, 0, 0, 255]}, {id: 7, name: 'Other', rgba: [0, 255, 0, 255]}]};
+  api.setup(viewer, {...slide, overlays: [...slide.overlays, prediction, {...prediction, id: 'hidden', initially_visible: false}]});
+  const masks = elements.get('#crop-masks') || document.querySelector('#crop-masks');
+  const mode = document.querySelector('#crop-mask-mode');
+  masks.checked = true; mode.value = 'all';
+  const plain = value => JSON.parse(JSON.stringify(value));
+  assert.deepEqual(plain(api.maskSelection()), {}, 'all mode ignores display settings');
+  mode.value = 'visible';
+  const controls = api.controls().get('prediction');
+  controls.classSettings[2].visible = false;
+  const snapshot = api.maskSelection();
+  assert.deepEqual(plain(snapshot), {overlay_ids: ['prediction'], overlay_class_ids: {prediction: [300]}}, 'visible mode excludes hidden layers, unchecked classes and detections');
+  controls.classSettings[0].visible = true;
+  assert.deepEqual(plain(api.maskSelection()).overlay_class_ids.prediction, [0, 300], 'class zero can be explicitly selected');
+  assert.deepEqual(plain(snapshot).overlay_class_ids.prediction, [300], 'submission snapshots are independent of later changes');
+  controls.opacity.value = '0';
+  assert.deepEqual(plain(api.maskSelection()), {overlay_ids: [], overlay_class_ids: {}}, 'zero-opacity layers are excluded');
+  masks.checked = false;
+  assert.deepEqual(plain(api.maskSelection()), {overlay_ids: []}, 'mask saving remains optional');
+  api.setup(viewer, {...slide, overlays: []});
+  masks.checked = true;
+  assert.deepEqual(plain(api.maskSelection()), {overlay_ids: [], overlay_class_ids: {}}, 'switching slides clears previous controls');
+  console.log('Detection controls and visible mask selection passed.');
 })().catch(error => {console.error(error); process.exitCode = 1;});

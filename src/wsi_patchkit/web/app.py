@@ -63,6 +63,7 @@ _STATIC_ASSETS = {
     "app.js": (_STATIC_DIR / "app.js").read_bytes(),
     "styles.css": (_STATIC_DIR / "styles.css").read_bytes(),
     "crops.js": (_STATIC_DIR / "crops.js").read_bytes(),
+    "crop-exports.js": (_STATIC_DIR / "crop-exports.js").read_bytes(),
     "crops.css": (_STATIC_DIR / "crops.css").read_bytes(),
 }
 _INDEX_HTML = (_STATIC_DIR / "index.html").read_text(encoding="utf-8")
@@ -272,6 +273,7 @@ def create_app(
     cache_control: str = "private, max-age=3600",
     crop_output_dir: str | Path = "crops",
     crop_workers: int = 1,
+    crop_exporters: ExporterRegistry | None = None,
     crop_history_days: int = 90,
     crop_history_limit: int = 5000,
     slide_scanner: SlideDirectoryScanner | None = None,
@@ -374,7 +376,7 @@ def create_app(
         history_limit=crop_history_limit,
         overlay_renderer=overlay_renderer,
     )
-    exporters = ExporterRegistry()
+    exporters = crop_exporters if crop_exporters is not None else ExporterRegistry()
 
     @asynccontextmanager
     async def lifespan(_: FastAPI):
@@ -624,7 +626,7 @@ def create_app(
         return archive_name
 
     @app.get("/api/crops/exporters")
-    def crop_exporters():
+    def list_crop_exporters():
         return exporters.public()
 
     @app.get("/api/crops", name="list_crops")
@@ -1049,6 +1051,30 @@ def create_app(
                 if max(item.id for item in overlay.classes) > 65535:
                     raise ValueError("PNG indexed masks require class IDs <= 65535")
                 selected_overlays.append(overlay)
+            overlay_class_ids = payload.get("overlay_class_ids")
+            if overlay_class_ids is not None:
+                if not isinstance(overlay_class_ids, dict):
+                    raise ValueError(
+                        "overlay_class_ids must map overlay IDs to class ID lists"
+                    )
+                selected_by_id = {
+                    overlay.overlay_id: overlay for overlay in selected_overlays
+                }
+                normalized_classes = {}
+                for key, ids in overlay_class_ids.items():
+                    if key not in selected_by_id:
+                        raise ValueError(
+                            "class filter references an unselected overlay"
+                        )
+                    if not isinstance(ids, list) or any(
+                        type(value) is not int for value in ids
+                    ):
+                        raise ValueError("class IDs must be integer lists")
+                    known = {item.id for item in selected_by_id[key].classes}
+                    if not set(ids) <= known:
+                        raise ValueError("unknown overlay class ID")
+                    normalized_classes[key] = list(dict.fromkeys(ids))
+                overlay_class_ids = normalized_classes
             if selected_overlays and image_format != "png":
                 raise ValueError("带掩码的裁剪请选择 PNG 格式")
             filename = _crop_filename(
@@ -1070,6 +1096,7 @@ def create_app(
                 namespace=namespace(request),
                 target_mpp=target_mpp,
                 overlays=tuple(selected_overlays),
+                overlay_class_ids=overlay_class_ids,
                 provenance={
                     "source_mpp": metadata.mpp,
                     "output_mpp": [target_mpp, target_mpp]

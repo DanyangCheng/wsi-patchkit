@@ -4,7 +4,7 @@
   <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
   <title>个人工作台 · WSI PatchKit</title>
   <link rel="stylesheet" href="/static/personal.css?v=2">
-  <script src="/static/auth.js" defer></script><script src="/static/personal.js?v=5" defer></script>
+  <script src="/static/auth.js" defer></script><script src="/static/crop-exports.js?v=1" defer></script><script src="/static/personal.js?v=6" defer></script>
 </head>
 <body>
 <header class="topbar">
@@ -39,7 +39,7 @@
       <div class="panel"><h2>上传队列</h2><div id="upload-list"></div></div>
     </section>
     <section id="jobs-panel" data-panel="jobs" hidden><div class="tools"><select id="job-slide-filter" aria-label="筛选任务切片"><option value="">所有切片</option></select><label>开始日期<input id="job-since" type="date"></label><label>结束日期<input id="job-until" type="date"></label><select id="job-filter" aria-label="筛选任务状态"><option value="">所有状态</option><option value="queued">等待中</option><option value="running">裁剪中</option><option value="completed">已完成</option><option value="failed">失败</option><option value="cancelled">已取消</option></select><a href="/?crop=1" class="primary">新建裁剪任务</a></div><p class="muted">任务管理</p><div id="job-list"></div><div class="tools"><button id="jobs-previous" class="secondary" disabled>上一页</button><span id="jobs-page-status" role="status"></span><button id="jobs-next" class="secondary" disabled>下一页</button></div></section>
-    <section data-panel="crops" hidden><div class="tools"><input id="crops-search" type="search" placeholder="搜索裁剪结果" aria-label="搜索裁剪结果"><label><input id="select-all" type="checkbox"> 全选当前结果</label><button id="download-crops">打包下载</button><button id="download-manifest" class="secondary">导出坐标清单</button><button id="delete-crops" class="danger">删除所选</button></div><p id="selection-count" class="muted"></p><div id="crops-grid" class="card-grid"></div></section>
+    <section data-panel="crops" hidden><div class="tools"><input id="crops-search" type="search" placeholder="搜索裁剪结果" aria-label="搜索裁剪结果"><label><input id="select-all" type="checkbox"> 全选当前结果</label><label>标签格式<select id="crop-label-format"><option value="indexed-png">类别索引 PNG</option></select></label><button id="download-crops">打包下载</button><button id="download-manifest" class="secondary">导出坐标清单</button><button id="delete-crops" class="danger">删除所选</button></div><p id="selection-count" class="muted"></p><div id="crops-grid" class="card-grid"></div></section>
     <section data-panel="trash" hidden><div class="panel"><h2>切片回收站</h2><div id="trash-list"></div></div></section>
     <section data-panel="account" hidden>
       <div id="account-disabled" class="panel" hidden>当前服务未启用登录认证。启用账号认证后可管理个人资料和密码。</div>

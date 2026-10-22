@@ -78,8 +78,10 @@ async def wait_job(client, job):
 async def test_bundle_masks_metadata_export_and_delete(tmp_path, target_mpp, size):
     slide, overlay = sources(tmp_path)
     output = tmp_path / "crops"
+    registry = ExporterRegistry()
     app = create_app(
         {"case": slide},
+        crop_exporters=registry,
         overlays={"case": {"prediction": overlay}},
         crop_output_dir=output,
         upload_dir=tmp_path / "uploads",
@@ -146,7 +148,8 @@ async def test_bundle_masks_metadata_export_and_delete(tmp_path, target_mpp, siz
                 str(bundle.metadata["output_dimensions"]),
             )
 
-        app.state.crop_exporters.register("custom", custom, name="Custom")
+        assert app.state.crop_exporters is registry
+        registry.register("custom", custom, name="Custom")
         response = await client.get("/api/crops/sample.png/export?label_format=custom")
         with ZipFile(BytesIO(response.content)) as archive:
             assert (
@@ -212,3 +215,211 @@ def test_registry_rejects_duplicate_and_invalid_formats():
         registry.register("indexed-png", lambda *_: None, name="duplicate")
     with pytest.raises(ValueError):
         registry.register("../escape", lambda *_: None, name="invalid")
+
+
+@pytest.mark.anyio
+async def test_native_fractional_level_preserves_image_mask_alignment(tmp_path):
+    # 8/3 is non-integral: round(2 * 8/3) selects column 1 instead of 2.
+    slide = tmp_path / "pyramid.tif"
+    native = np.broadcast_to(
+        np.array([4, 12, 20], dtype="uint8")[None, :, None], (3, 3, 3)
+    ).copy()
+    with tifffile.TiffWriter(slide) as writer:
+        writer.write(
+            np.zeros((8, 8, 3), dtype="uint8"),
+            photometric="rgb",
+            subifds=1,
+            resolution=(40000, 20000),
+            resolutionunit="CENTIMETER",
+            metadata=None,
+        )
+        writer.write(native, photometric="rgb", subfiletype=1, metadata=None)
+    mask = np.broadcast_to(np.arange(24, dtype="uint8"), (24, 24)).copy()
+    tifffile.imwrite(tmp_path / "indices.tif", mask, metadata=None)
+    overlay = IndexedOverlay(
+        slide_id="case",
+        overlay_id="dense",
+        classes=tuple(OverlayClass(i, str(i), (i, i, i, 255)) for i in range(24)),
+        fragments=(
+            OverlayFragment(
+                source=TiffRasterSource(tmp_path / "indices.tif"),
+                geometry=OverlayGeometry(
+                    origin_um=(0, 0), mpp=(2 / 24, 4 / 24), dimensions=(24, 24)
+                ),
+                revision="v1",
+            ),
+        ),
+    )
+    output = tmp_path / "crops"
+    app = create_app(
+        {"case": slide},
+        overlays={"case": {"dense": overlay}},
+        crop_output_dir=output,
+        upload_dir=tmp_path / "uploads",
+    )
+    async with (
+        app.router.lifespan_context(app),
+        httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=app),
+            base_url="http://test",
+        ) as client,
+    ):
+        response = await client.post(
+            "/api/slides/case/crops",
+            json={
+                "x": 2,
+                "y": 1,
+                "width": 1,
+                "height": 1,
+                "level": 1,
+                "filename": "native.png",
+            },
+        )
+        assert response.status_code == 202, response.text
+        assert (await wait_job(client, response.json()))["status"] == "completed"
+        with Image.open(output / "native.png") as image:
+            assert image.getpixel((0, 0)) == (20, 20, 20)
+        with Image.open(output / "native.png.labels/layer-0/mask.png") as image:
+            assert image.getpixel((0, 0)) == 20
+        with Image.open(output / "native.png.labels/layer-0/coverage.png") as image:
+            assert image.getpixel((0, 0)) == 1
+        metadata = json.loads((output / "native.png.labels/metadata.json").read_text())
+        assert metadata["region_level0"] == pytest.approx([16 / 3, 8 / 3, 8 / 3, 8 / 3])
+        assert metadata["output_mpp"] == pytest.approx([2 / 3, 4 / 3])
+
+
+@pytest.mark.anyio
+async def test_bundle_publication_failure_removes_owned_artifacts(
+    tmp_path, monkeypatch
+):
+    slide, overlay = sources(tmp_path)
+    output = tmp_path / "crops"
+    app = create_app(
+        {"case": slide},
+        overlays={"case": {"prediction": overlay}},
+        crop_output_dir=output,
+        upload_dir=tmp_path / "uploads",
+    )
+
+    def fail_publication(*args):
+        raise OSError("simulated disk failure")
+
+    monkeypatch.setattr("wsi_patchkit.web.crops.os.link", fail_publication)
+    async with (
+        app.router.lifespan_context(app),
+        httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=app),
+            base_url="http://test",
+        ) as client,
+    ):
+        response = await client.post(
+            "/api/slides/case/crops",
+            json={
+                "x": 0,
+                "y": 0,
+                "width": 8,
+                "height": 8,
+                "filename": "failed.png",
+            },
+        )
+        assert (await wait_job(client, response.json()))["status"] == "failed"
+        assert list(output.iterdir()) == []
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("selected,expected_count", [([300], 8), ([0], 4), ([], 0)])
+async def test_crop_class_filter_preserves_ids_and_effective_coverage(
+    tmp_path, selected, expected_count
+):
+    slide, overlay = sources(tmp_path)
+    output = tmp_path / "crops"
+    app = create_app(
+        {"case": slide},
+        overlays={"case": {"prediction": overlay}},
+        crop_output_dir=output,
+        upload_dir=tmp_path / "uploads",
+    )
+    async with (
+        app.router.lifespan_context(app),
+        httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=app),
+            base_url="http://test",
+        ) as client,
+    ):
+        response = await client.post(
+            "/api/slides/case/crops",
+            json={
+                "x": 0,
+                "y": 0,
+                "width": 8,
+                "height": 8,
+                "filename": "selected.png",
+                "overlay_ids": ["prediction"],
+                "overlay_class_ids": {"prediction": selected},
+            },
+        )
+        assert response.status_code == 202, response.text
+        job = response.json()
+        assert job["overlay_class_ids"] == {"prediction": selected}
+        assert (await wait_job(client, job))["status"] == "completed"
+        bundle = output / "selected.png.labels"
+        with Image.open(bundle / "layer-0/mask.png") as image:
+            indices = np.array(image)
+        with Image.open(bundle / "layer-0/coverage.png") as image:
+            coverage = np.array(image)
+        assert int(coverage.sum()) == expected_count
+        assert np.all(indices[coverage == 0] == 0)
+        if expected_count:
+            assert set(np.unique(indices[coverage == 1])) == set(selected)
+        metadata = json.loads((bundle / "metadata.json").read_text())
+        assert metadata["overlays"][0]["selected_class_ids"] == selected
+        assert (
+            metadata["overlays"][0]["coverage_values"]["0"]
+            == "unpredicted_or_unselected"
+        )
+        # Retry reconstructs the saved selection without consulting the browser.
+        record = app.state.crop_jobs.list()[0]
+        record["status"] = "failed"
+        app.state.crop_jobs._store.put("local", "job", record["job_id"], record)
+        retry = await client.post(f"/api/personal/jobs/{record['job_id']}/retry")
+        assert retry.status_code == 202, retry.text
+        assert retry.json()["overlay_class_ids"] == {"prediction": selected}
+        assert (await wait_job(client, retry.json()))["status"] == "completed"
+
+
+@pytest.mark.anyio
+async def test_crop_rejects_invalid_class_filters(tmp_path):
+    slide, overlay = sources(tmp_path)
+    app = create_app(
+        {"case": slide},
+        overlays={"case": {"prediction": overlay}},
+        crop_output_dir=tmp_path / "crops",
+        upload_dir=tmp_path / "uploads",
+    )
+    async with (
+        app.router.lifespan_context(app),
+        httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=app),
+            base_url="http://test",
+        ) as client,
+    ):
+        for filters in (
+            [],
+            {"prediction": [True]},
+            {"prediction": [300.0]},
+            {"prediction": [999]},
+            {"prediction": "300"},
+            {"missing": [0]},
+        ):
+            response = await client.post(
+                "/api/slides/case/crops",
+                json={
+                    "x": 0,
+                    "y": 0,
+                    "width": 8,
+                    "height": 8,
+                    "overlay_ids": ["prediction"],
+                    "overlay_class_ids": filters,
+                },
+            )
+            assert response.status_code == 400, response.text

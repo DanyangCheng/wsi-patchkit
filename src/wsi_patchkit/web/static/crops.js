@@ -123,7 +123,7 @@
     if (crop.export_url) {
       const bundle = document.createElement("a");
       bundle.className = "action-button";
-      bundle.href = crop.export_url;
+      bundle.href = window.patchkitExports.url(crop.export_url);
       bundle.textContent = "下载图像与标签";
       actions.append(bundle);
     }
@@ -221,7 +221,7 @@
     try {
       const response = await fetch("/api/crops/batch-download", {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ filenames, include_manifest: true }),
+        body: JSON.stringify({ filenames, include_manifest: true, label_format: window.patchkitExports.format() }),
       });
       if (!response.ok) {
         const result = await response.json();
@@ -271,5 +271,6 @@
   deleteSelectedButton.addEventListener("click", () => {
     deleteCrops([...selectedCrops]);
   });
+  window.patchkitExports.load(renderCrops).catch(error => setStatus(error.message, "error"));
   loadCrops();
 })();

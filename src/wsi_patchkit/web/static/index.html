@@ -4,13 +4,13 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>WSI PatchKit Viewer</title>
-    <link rel="stylesheet" href="/static/styles.css?v=15" />
+    <link rel="stylesheet" href="/static/styles.css?v=16" />
     <script
       src="https://cdn.jsdelivr.net/npm/openseadragon@5.0.1/build/openseadragon/openseadragon.min.js"
       defer
     ></script>
     <script src="/static/auth.js" defer></script>
-    <script src="/static/app.js?v=22" defer></script>
+    <script src="/static/app.js?v=23" defer></script>
     <script src="/static/viewer-crops.js?v=2" defer></script>
   </head>
   <body>
@@ -135,7 +135,15 @@
           </label>
         </div>
         <div class="crop-fields"><label>目标 MPP（0 为原生层级）<input id="crop-target-mpp" type="number" min="0" max="1000" step="any" value="0"></label></div>
-        <label><input id="crop-masks" type="checkbox" checked> 同步保存全部类别掩码（需 PNG）</label>
+        <div class="crop-fields">
+          <label class="crop-mask-toggle"><input id="crop-masks" type="checkbox" checked><span>保存类别掩码（需 PNG）</span></label>
+          <label>掩码范围
+            <select id="crop-mask-mode">
+              <option value="all">全部类别掩码</option>
+              <option value="visible">当前显示的类别掩码</option>
+            </select>
+          </label>
+        </div>
         <button id="crop-save" class="primary" type="button">保存到服务器</button>
         <details class="crop-section" open><summary>当前切片任务</summary><div id="crop-job-list" aria-live="polite"></div><button id="crop-jobs-more" type="button" hidden>加载更多</button></details>
         <p id="crop-status" class="crop-status" aria-live="polite"></p>
