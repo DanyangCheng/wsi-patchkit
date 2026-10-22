@@ -280,8 +280,9 @@ with AutoSlideReader() as reader:
 ```
 
 For the viewer, pass `--source-mpp 0.25` (or `--source-mpp 0.25,0.5` for
-an X/Y pair). This overrides embedded MPP for registered, scanned, and uploaded
-images. All images in that invocation should share the specified resolution.
+an X/Y pair). This supplies missing MPP for registered, scanned, and uploaded
+images; images with embedded MPP retain their own resolution. Images without
+embedded MPP in that invocation should share the specified resolution.
 For images with detection overlays, use the actual source resolution matching
 `provenance.source_mpp` in the prediction manifest. The Python API accepts
 `create_app(..., source_mpp=0.25)`; a per-image `SlideSource.source_mpp` takes

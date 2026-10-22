@@ -226,12 +226,21 @@ def test_slide_mpp_bounds_and_revision(tmp_path):
 
 
 @pytest.mark.anyio
+@pytest.mark.parametrize("embedded_mpp", [False, True])
 @pytest.mark.parametrize("source_mpp,status", [(None, 422), (0.25, 200), (0.5, 422)])
-async def test_png_detection_overlay_requires_matching_mpp(
-    tmp_path, source_mpp, status,
+async def test_detection_overlay_uses_embedded_or_fallback_mpp(
+    tmp_path, source_mpp, status, embedded_mpp,
 ):
-    image = tmp_path / "case.png"
-    Image.new("RGB", (32, 32)).save(image)
+    if embedded_mpp:
+        image = tmp_path / "case.tif"
+        tifffile.imwrite(
+            image, np.zeros((32, 32, 3), dtype=np.uint8), photometric="rgb",
+            resolution=(40000, 40000), resolutionunit="CENTIMETER", metadata=None,
+        )
+        status = 200
+    else:
+        image = tmp_path / "case.png"
+        Image.new("RGB", (32, 32)).save(image)
     app = create_app(
         {"case": image}, overlays={"case": {"nuclei": manifest(tmp_path)}},
         source_mpp=source_mpp, upload_dir=tmp_path / "uploads",
@@ -244,7 +253,7 @@ async def test_png_detection_overlay_requires_matching_mpp(
     ):
         result = await client.get("/api/slides/case")
         assert result.status_code == status
-        if source_mpp is None:
+        if status == 422 and source_mpp is None:
             assert "--source-mpp" in result.json()["detail"]
         elif status == 422:
             assert "differs" in result.json()["detail"]

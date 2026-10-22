@@ -106,6 +106,8 @@ async def test_default_mpp_survives_scans_and_applies_to_uploads(tmp_path: Path)
     directory.mkdir()
     image = directory / "ordinary.png"
     Image.new("RGB", (8, 8)).save(image)
+    native = directory / "native.tif"
+    _write_slide(native)
     scanner = SlideDirectoryScanner([directory], interval=0)
     app = create_app(
         scanner.refresh(), slide_scanner=scanner, source_mpp=(0.25, 0.5),
@@ -117,15 +119,26 @@ async def test_default_mpp_survives_scans_and_applies_to_uploads(tmp_path: Path)
         for _ in range(2):
             await client.get("/api/slides")
             result = await client.get("/api/slides/ordinary.png")
+            assert result.status_code == 200
             assert result.json()["mpp"] == [0.25, 0.5]
-        result = await client.post(
-            "/api/slides/upload", params={"filename": "uploaded.png"},
-            content=image.read_bytes(),
-        )
-        assert result.status_code == 201
-        slide_id = result.json()["id"]
-        metadata = (await client.get(f"/api/slides/{slide_id}")).json()
-        assert metadata["mpp"] == [0.25, 0.5]
+            result = await client.get("/api/slides/native.tif")
+            assert result.status_code == 200
+            assert result.json()["mpp"] == [0.25, 0.25]
+        for slide_id in ("ordinary.png", "native.tif"):
+            info = await client.get(f"/iiif/3/{slide_id}/info.json")
+            assert info.status_code == 200
+            assert (
+                await client.get(f"/iiif/3/{slide_id}/full/8,/0/default.jpg")
+            ).status_code == 200
+        for path, expected_mpp in ((image, [0.25, 0.5]), (native, [0.25, 0.25])):
+            result = await client.post(
+                "/api/slides/upload", params={"filename": f"uploaded{path.suffix}"},
+                content=path.read_bytes(),
+            )
+            assert result.status_code == 201
+            slide_id = result.json()["id"]
+            metadata = (await client.get(f"/api/slides/{slide_id}")).json()
+            assert metadata["mpp"] == expected_mpp
 
 
 def test_discover_slides_recurses_filters_and_creates_unique_ids(

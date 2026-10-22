@@ -270,9 +270,10 @@ def main() -> None:
     )
     parser.add_argument(
         "--source-mpp",
+        default=0.5,
         type=_source_mpp,
         metavar="MPP|X,Y",
-        help="override source resolution in micrometers/pixel for served images",
+        help="fallback resolution in micrometers/pixel for images with missing MPP",
     )
     parser.add_argument("--tile-size", default=512, type=int)
     parser.add_argument("--reader-pool-size", default=4, type=int)

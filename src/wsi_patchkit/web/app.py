@@ -451,8 +451,6 @@ def create_app(
             source = registry[slide_id]
         except KeyError as error:
             raise HTTPException(status_code=404, detail="unknown slide") from error
-        if source.source_mpp is None and default_mpp is not None:
-            return SlideSource(source.path, source_mpp=default_mpp)
         return source
 
     def scan_slides():
@@ -475,6 +473,9 @@ def create_app(
         source = source_for(slide_id)
         try:
             metadata = renderer.metadata(source.path, source_mpp=source.source_mpp)
+            if metadata.mpp is None and default_mpp is not None:
+                source = SlideSource(source.path, source_mpp=default_mpp)
+                metadata = renderer.metadata(source.path, source_mpp=source.source_mpp)
         except (ImportError, OSError, RuntimeError, ValueError, TiffFileError) as error:
             _LOGGER.exception("Unable to read registered slide %s", slide_id)
             raise HTTPException(
