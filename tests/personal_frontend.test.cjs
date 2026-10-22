@@ -39,7 +39,7 @@ class Element {
   remove() { this.parent.children = this.parent.children.filter(c => c !== this); }
 }
 
-function screen() {
+function screen({ jobRecords = [], source = null } = {}) {
   const controls = new Map(), panels = [], tabs = [], downloads = [], requests = [];
   for (const match of html.matchAll(/<([a-z][\w-]*)\b([^>]*)>/gi)) {
     const [, tag, attrs] = match, node = new Element(tag);
@@ -51,7 +51,7 @@ function screen() {
     }
   }
   let crops = ["alpha.png", "beta.png"].map(filename => ({
-    filename, size_bytes: 100, modified_at: "2026-10-19T00:00:00Z",
+    filename, source, size_bytes: 100, modified_at: "2026-10-19T00:00:00Z",
     image_url: `/api/crops/${filename}/image`,
     download_url: `/api/crops/${filename}/download`,
   }));
@@ -83,6 +83,12 @@ function screen() {
         const { filenames } = JSON.parse(options.body);
         crops = crops.filter(c => !filenames.includes(c.filename));
         return Response.json({ filenames, deleted: filenames.length });
+      }
+      if (endpoint.startsWith("/api/personal/jobs?")) {
+        const params = new URL(endpoint, "http://testserver").searchParams;
+        const filtered = jobRecords.filter(j => (!params.get("status") || j.status === params.get("status")) && (!params.get("slide_id") || j.slide_id === params.get("slide_id")));
+        const offset = Number(params.get("cursor") || 0), limit = Number(params.get("limit"));
+        return Response.json({ items: filtered.slice(offset, offset + limit), counts: {completed: filtered.length}, next_cursor: offset + limit < filtered.length ? String(offset + limit) : null });
       }
       const data = {
         "/api/crops": crops,
@@ -134,4 +140,34 @@ test("crop management initializes, filters, downloads and deletes selected crops
   assert.match(get("#crops-grid").textContent, /beta.png/);
   assert.doesNotMatch(get("#crops-grid").textContent, /alpha.png/);
   assert.equal(get("#delete-crops").disabled, true);
+});
+
+test("task records paginate on the server and reset the cursor on filter changes", async () => {
+  const jobRecords = Array.from({length: 70}, (_, i) => ({job_id: String(i), filename: `crop-${i}.png`, status: "completed", slide_id: "slide", level: 0, created_at: 100, region: {x: 0, y: 0, width: 8, height: 8}}));
+  const page = screen({jobRecords}), get = selector => page.controls.get(selector);
+  await settle();
+  assert.equal(get("#job-list").children.length, 50);
+  assert.equal(get("#jobs-previous").disabled, true);
+  assert.equal(get("#jobs-next").disabled, false);
+  await get("#jobs-next").dispatch("click"); await settle();
+  assert.equal(get("#job-list").children.length, 20);
+  assert.equal(get("#jobs-previous").disabled, false);
+  assert.equal(get("#jobs-next").disabled, true);
+  await get("#jobs-previous").dispatch("click"); await settle();
+  assert.equal(get("#job-list").children.length, 50);
+  get("#job-filter").value = "failed";
+  await get("#job-filter").dispatch("change"); await settle();
+  assert.match(get("#job-list").textContent, /当前没有/);
+  assert.equal(get("#jobs-previous").disabled, true);
+  const params = new URL(page.requests.filter(r => r.endpoint.startsWith("/api/personal/jobs?")).at(-1).endpoint, "http://testserver").searchParams;
+  assert.equal(params.get("status"), "failed");
+  assert.equal(params.get("cursor"), null);
+});
+
+test("crop source links remain available without their task history", async () => {
+  const page = screen({source: {slide_id: "slide", level: 0, region: {x: 1, y: 2, width: 8, height: 8}}});
+  await settle();
+  const grid = page.controls.get("#crops-grid");
+  assert.match(grid.textContent, /定位来源/);
+  assert.doesNotMatch(grid.textContent, /来源坐标未记录/);
 });

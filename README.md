@@ -245,8 +245,8 @@ library, recycle bin, and account settings. See the
 [personal workspace guide](docs/PERSONAL_WORKSPACE.md) for the full workflow.
 
 Each account can organize its accessible slides with private projects, tags and
-notes. Open **裁剪任务** in the slide viewer to select rectangle or polygon ROIs
-on the slide, preview patch grids, and reuse crop templates. The personal result
+notes. Open **裁剪任务** in the slide viewer to move a rectangular crop area
+on the slide and submit crop jobs. The personal result
 library exports images with coordinate and resolution metadata. Crop in native-level
 pixels or set a target MPP when the slide's physical resolution is known.
 Account settings allow profile updates, password changes and signing out all
@@ -340,15 +340,20 @@ docker run --rm -p 8000:8000 \
   wsi-patchkit
 ```
 
-Select **裁剪任务** in the viewer to choose a rectangle or polygon directly on
-the slide. Coordinates and dimensions use pixels at the selected native level.
-Choose an output format and optional target MPP, save named regions and parameter
-templates, and preview patch grids on the slide before submitting background jobs.
+Select **裁剪任务** in the viewer to move the rectangular crop area on the slide.
+Coordinates and dimensions use pixels at the selected native level. Choose an
+output format and optional target MPP before submitting a background job.
 Without a target MPP, crops retain the selected level's native resolution.
 The viewer remembers the most recently entered crop width and height when
 switching slides or reloading the page. The server stores images in
 `--crop-output-dir` (default `./crops`) and never overwrites an existing file.
 One crop worker is used by default; use `--crop-workers N` to change concurrency.
+The crop panel loads 20 tasks at a time; the personal task list uses pages of 50
+with slide, status, and date filters. Ended jobs are cleaned at startup and daily:
+defaults are 90 days and 5,000 ended jobs per account, configurable with
+`--crop-history-days` and `--crop-history-limit`. Active jobs are retained.
+Result provenance is stored independently and remains available after task history
+is cleaned.
 The viewer panel displays current-slide tasks and supports cancelling queued jobs
 and retrying failures. Open **个人管理 → 裁剪管理** to browse saved crops, download
 images and coordinate metadata, or delete selections.

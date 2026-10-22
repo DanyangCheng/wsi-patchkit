@@ -232,7 +232,7 @@ async def test_grid_exports_provenance_and_recycle_restore_across_restart(
         submitted = await mutate(client, "POST", base + "/grid", payload)
         assert submitted.status_code == 202 and submitted.json()["count"] == 4
         for _ in range(200):
-            jobs = (await client.get("/api/personal/jobs")).json()
+            jobs = (await client.get("/api/personal/jobs")).json()["items"]
             if all(j["status"] == "completed" for j in jobs):
                 break
             await asyncio.sleep(0.01)
@@ -258,7 +258,7 @@ async def test_grid_exports_provenance_and_recycle_restore_across_restart(
     async with running(tmp_path, digest) as (_, client):
         await login(client)
         assert (await client.get("/api/slides")).json() == []
-        assert len((await client.get("/api/personal/jobs")).json()) == 4
+        assert len((await client.get("/api/personal/jobs")).json()["items"]) == 4
         assert (await mutate(client, "POST", base + "/restore")).status_code == 200
         assert (await client.get(f"/api/slides/{slide_id}")).status_code == 200
 
@@ -387,7 +387,7 @@ async def test_cancel_and_retry_preserve_account_scoped_queue(tmp_path, digest):
         finally:
             release.set()
         for _ in range(200):
-            jobs = (await client.get("/api/personal/jobs")).json()
+            jobs = (await client.get("/api/personal/jobs")).json()["items"]
             if all(j["status"] not in {"queued", "running"} for j in jobs):
                 break
             await asyncio.sleep(0.01)
@@ -396,4 +396,119 @@ async def test_cancel_and_retry_preserve_account_scoped_queue(tmp_path, digest):
             "completed",
             "completed",
         ]
+        assert (
+            await mutate(client, "POST", job_path + "/cancel")
+        ).status_code == 409
         assert len((await client.get("/api/crops")).json()) == 2
+
+
+@pytest.mark.anyio
+async def test_job_history_api_is_bounded_filtered_and_account_scoped(tmp_path, digest):
+    async with running(tmp_path, digest) as (app, client):
+        await login(client)
+        store = app.state.crop_jobs._store
+        for i in range(110):
+            record = {
+                "job_id": f"job{i:03}",
+                "slide_id": "a" if i % 2 else "b",
+                "status": "failed",
+                "created_at": i + 1,
+                "updated_at": i + 1,
+                "filename": f"{i}.png",
+            }
+            store.put("local", "job", record["job_id"], record)
+        store.put(
+            "another-account",
+            "job",
+            "secret",
+            {
+                "job_id": "secret",
+                "slide_id": "a",
+                "status": "failed",
+                "created_at": 1000,
+                "updated_at": 1000,
+            },
+        )
+        page = (await client.get("/api/personal/jobs")).json()
+        assert len(page["items"]) == 20 and page["counts"] == {"failed": 110}
+        ids = set()
+        cursor = None
+        while True:
+            params = {
+                "slide_id": "a",
+                "status": "failed",
+                "since": 40,
+                "until": 100,
+                "limit": 7,
+            }
+            if cursor:
+                params["cursor"] = cursor
+            response = await client.get("/api/personal/jobs", params=params)
+            assert response.status_code == 200
+            page = response.json()
+            assert len(page["items"]) <= 7
+            assert not ids.intersection(j["job_id"] for j in page["items"])
+            ids.update(j["job_id"] for j in page["items"])
+            cursor = page["next_cursor"]
+            if not cursor:
+                break
+        assert len(ids) == 31 and "secret" not in ids
+        assert (
+            len((await client.get("/api/personal/jobs?limit=100")).json()["items"])
+            == 100
+        )
+        for query in (
+            "limit=0",
+            "limit=101",
+            "status=unknown",
+            "since=nan",
+            "until=inf",
+        ):
+            assert (await client.get("/api/personal/jobs?" + query)).status_code == 422
+        for query in ("cursor=invalid", "since=100&until=1"):
+            assert (await client.get("/api/personal/jobs?" + query)).status_code == 400
+
+
+@pytest.mark.anyio
+async def test_result_source_survives_history_cleanup_and_restart(tmp_path, digest):
+    async with running(tmp_path, digest) as (app, client):
+        await login(client)
+        slide_id = await upload(client)
+        params = {"x": 1, "y": 2, "width": 8, "height": 8}
+        response = await mutate(client, "POST", f"/api/slides/{slide_id}/crops", params)
+        assert response.status_code == 202
+        job_id = response.json()["job_id"]
+        for _ in range(200):
+            job = (await client.get(f"/api/slides/{slide_id}/crops/{job_id}")).json()
+            if job["status"] == "completed":
+                break
+            await asyncio.sleep(0.01)
+        assert job["status"] == "completed"
+        queue = app.state.crop_jobs
+        record = queue._store.get("local", "job", job_id)
+        queue._store.put(
+            "local", "job", job_id, {**record, "created_at": 1, "updated_at": 1}
+        )
+        assert queue.cleanup_history() == 1
+        assert (await client.get("/api/personal/jobs")).json()["items"] == []
+        result = (await client.get("/api/crops")).json()[0]
+        assert result["source"]["region"] == params
+        assert result["source"]["slide_id"] == slide_id
+        assert (await client.get(result["download_url"])).status_code == 200
+        manifest = (await client.get("/api/personal/manifest")).json()
+        assert manifest["crops"][0]["region"] == params
+    async with running(tmp_path, digest) as (app, client):
+        await login(client)
+        result = (await client.get("/api/crops")).json()[0]
+        assert result["source"]["region"] == params
+        assert (await client.get("/api/personal/jobs")).json()["items"] == []
+        response = await mutate(
+            client,
+            "POST",
+            "/api/crops/batch-delete",
+            {"filenames": [result["filename"]]},
+        )
+        assert response.status_code == 200
+        assert (
+            app.state.crop_jobs._store.get("local", "crop", result["filename"]) is None
+        )

@@ -5,6 +5,7 @@
   const states = { queued: "等待中", running: "裁剪中", completed: "已完成", failed: "失败", cancelled: "已取消" };
   let slides = [], jobs = [], crops = [], uploads = [], selected = new Set();
   let detail = null;
+  let jobCursor = null, jobNext = null, jobPrevious = [], jobSequence = 0;
   const panelScrollPositions = new Map();
   let currentPanel = null;
   let detailSequence = 0, busyRefresh = false;
@@ -88,8 +89,9 @@
     if (!data.recent_views.length) empty($("#recent-views"), "打开切片后，最近查看的记录会出现在这里。");
     $("#recent-slides").replaceChildren(...slides.filter(s => s.uploaded).slice(0, 5).map(s => row(title(s), `${bytes(s.size_bytes)} · ${date(s.modified_at)}`, [action("打开", () => openDetail(s))])));
     if (!$("#recent-slides").children.length) empty($("#recent-slides"), "上传第一张切片，开始整理你的工作空间。");
-    $("#recent-jobs").replaceChildren(...jobs.slice(0, 5).map(j => row(j.filename, `${states[j.status]} · ${date(j.created_at)}`, [link("查看任务", "#jobs")])));
-    if (!jobs.length) empty($("#recent-jobs"), "还没有裁剪任务。可从切片库选择区域。");
+    const recent = data.recent_jobs || [];
+    $("#recent-jobs").replaceChildren(...recent.map(j => row(j.filename, `${states[j.status]} · ${date(j.created_at)}`, [link("查看任务", "#jobs")])));
+    if (!recent.length) empty($("#recent-jobs"), "还没有裁剪任务。可从切片库选择区域。");
   }
   function filteredSlides() {
     const query = $("#slide-search").value.toLowerCase(), project = $("#project-filter").value;
@@ -109,7 +111,7 @@
     if (!cards.length) empty($("#slide-grid"), "没有匹配的切片。可以调整搜索或上传切片。");
   }
   function renderJobs() {
-    const filtered = jobs.filter(j => !$("#job-filter").value || j.status === $("#job-filter").value);
+    const filtered = jobs;
     $("#job-list").replaceChildren(...filtered.map(j => {
       const actions = [link("定位区域", viewerLink(j.slide_id, j))];
       if (j.status === "queued") actions.push(action("取消", async () => { await api(`/api/personal/jobs/${j.job_id}/cancel`, "POST"); await refresh(); }));
@@ -134,6 +136,33 @@
     }));
     if (!filtered.length) empty($("#job-list"), "当前没有此状态的任务。");
   }
+  async function loadJobsPage(cursor = jobCursor, previous = jobPrevious) {
+    const sequence = ++jobSequence;
+    const params = new URLSearchParams({limit: "50"});
+    if (cursor) params.set("cursor", cursor);
+    if ($("#job-filter").value) params.set("status", $("#job-filter").value);
+    if ($("#job-slide-filter").value) params.set("slide_id", $("#job-slide-filter").value);
+    if ($("#job-since").value) params.set("since", new Date($("#job-since").value + "T00:00:00").getTime() / 1000);
+    if ($("#job-until").value) {
+      const end = new Date($("#job-until").value + "T00:00:00"); end.setDate(end.getDate() + 1);
+      params.set("until", (end.getTime() - 1) / 1000);
+    }
+    $("#jobs-previous").disabled = $("#jobs-next").disabled = true;
+    try {
+      const result = await api(`/api/personal/jobs?${params}`);
+      if (sequence !== jobSequence) return;
+      jobs = result.items; jobCursor = cursor; jobPrevious = previous; jobNext = result.next_cursor;
+      const total = $("#job-filter").value ? result.counts[$("#job-filter").value] || 0 : Object.values(result.counts).reduce((a, b) => a + b, 0);
+      $("#jobs-page-status").textContent = `第 ${previous.length + 1} 页 · 共 ${total} 条 · 每页 50 条`;
+      const panel = $("#jobs-panel"), scrollTop = panel.scrollTop;
+      renderJobs(); panel.scrollTop = scrollTop;
+    } finally {
+      if (sequence === jobSequence) {
+        $("#jobs-previous").disabled = !jobPrevious.length;
+        $("#jobs-next").disabled = !jobNext;
+      }
+    }
+  }
   function visibleCrops() { return crops.filter(r => r.filename.toLowerCase().includes($("#crops-search").value.toLowerCase())); }
   function renderCrops() {
     const available = new Set(crops.map(r => r.filename));
@@ -145,7 +174,7 @@
       const body = node("div", undefined, "card-body"), label = node("label"), checkbox = node("input"); checkbox.type = "checkbox"; checkbox.checked = selected.has(r.filename); checkbox.setAttribute("aria-label", `选择 ${r.filename}`);
       checkbox.addEventListener("change", () => { checkbox.checked ? selected.add(r.filename) : selected.delete(r.filename); selectionInfo(); }); label.append(checkbox, document.createTextNode(" 选择"));
       body.append(label, node("h2", r.filename), node("p", `${bytes(r.size_bytes)} · ${date(r.modified_at)}`));
-      const j = jobs.find(j => j.filename === r.filename && j.status === "completed");
+      const j = r.source?.slide_id ? r.source : null;
       const actions = node("div", undefined, "actions"); actions.append(link("下载", r.download_url));
       if (j) { body.append(node("p", `Level ${j.level} · (${j.region.x}, ${j.region.y}) · ${j.region.width} × ${j.region.height}`)); actions.append(link("定位来源", viewerLink(j.slide_id, j))); }
       else body.append(node("p", "历史图像：来源坐标未记录"));
@@ -169,12 +198,16 @@
     if (busyRefresh) return;
     busyRefresh = true; $("#refresh").disabled = true;
     try {
-      const data = await Promise.all([api("/api/personal/slides"), api("/api/personal/jobs"), api("/api/crops"), api("/api/personal/overview"), api("/api/personal/trash"), api("/api/personal/uploads")]);
-      [slides, jobs, crops] = data; uploads = data[5].map(r => activeUploads.has(r.id) ? (uploads.find(u => u.id === r.id) || r) : r);
+      const data = await Promise.all([api("/api/personal/slides"), loadJobsPage(), api("/api/crops"), api("/api/personal/overview"), api("/api/personal/trash"), api("/api/personal/uploads")]);
+      slides = data[0]; crops = data[2]; uploads = data[5].map(r => activeUploads.has(r.id) ? (uploads.find(u => u.id === r.id) || r) : r);
+      const selectedSlide = $("#job-slide-filter").value;
+      $("#job-slide-filter").replaceChildren(new Option("所有切片", ""), ...slides.map(s => new Option(title(s), s.id)));
+      if (selectedSlide && !slides.some(s => s.id === selectedSlide)) $("#job-slide-filter").append(new Option(`历史切片 ${selectedSlide}`, selectedSlide));
+      $("#job-slide-filter").value = selectedSlide;
       const current = $("#project-filter").value;
       $("#project-filter").replaceChildren(new Option("所有项目", ""), ...[...new Set(slides.map(s => s.project).filter(Boolean))].sort().map(p => new Option(p, p)));
       $("#project-filter").value = [...$("#project-filter").options].some(o => o.value === current) ? current : "";
-      renderSlides(); renderJobs(); renderCrops(); renderOverview(data[3]); renderUploads();
+      renderSlides(); renderCrops(); renderOverview(data[3]); renderUploads();
       $("#trash-list").replaceChildren(...data[4].map(r => row(r.name, `移入时间 ${date(r.deleted_at)} · 关联任务 ${r.related_jobs}`, [action("恢复", async () => { await api(`/api/personal/slides/${encodeURIComponent(r.id)}/restore`, "POST"); status("切片已恢复"); await refresh(); })])));
       if (!data[4].length) empty($("#trash-list"), "回收站为空。");
     } finally { busyRefresh = false; $("#refresh").disabled = false; }
@@ -190,16 +223,6 @@
     $("#greeting").textContent = `${result.profile.display_name || user.username}，开始今天的探索。`;
     $("#admin-link").hidden = !user.is_admin;
   }
-  async function loadRegions() {
-    const id = detail.id;
-    const regions = await api(`/api/personal/slides/${encodeURIComponent(id)}/regions`);
-    if (detail?.id !== id) return;
-    $("#region-list").replaceChildren(...regions.map(r => {
-      const href = viewerLink(id, {level: r.level, region: r}) + `&region=${encodeURIComponent(r.id)}`;
-      return row(r.name, `L${r.level}: ${r.width} × ${r.height}${r.notes ? " · " + r.notes : ""}`, [link("在查看器中使用", href), action("删除", async () => { await api(`/api/personal/slides/${encodeURIComponent(id)}/regions/${r.id}`, "DELETE"); await loadRegions(); }, "danger")]);
-    }));
-    if (!regions.length) empty($("#region-list"), "在查看器中保存选区后，可从这里继续使用。");
-  }
   async function openDetail(s) {
     const sequence = ++detailSequence; detail = s;
     $("#detail-title").textContent = title(s); $("#slide-preview").src = thumb(s.id);
@@ -207,13 +230,13 @@
     for (const k of ["project", "notes"]) $("#slide-form").elements[k].value = s[k] || "";
     $("#slide-form").elements.tags.value = s.tags.join(", ");
     status("正在读取切片信息…", false, "#detail-status");
-    $("#slide-info").replaceChildren(); $("#region-list").replaceChildren();
+    $("#slide-info").replaceChildren();
     if (!$("#slide-dialog").open) $("#slide-dialog").showModal();
     try {
       const data = await api(`/api/slides/${encodeURIComponent(s.id)}`);
       if (sequence !== detailSequence) return;
       info("#slide-info", [["尺寸", `${data.width} × ${data.height} px`], ["MPP", data.mpp ? data.mpp.join(" × ") + " μm/px" : "未知"], ["文件大小", bytes(s.size_bytes)], ["格式", title(s).split(".").pop().toUpperCase()], ["来源", s.uploaded ? "个人上传" : "共享切片"]]);
-      await Promise.all([loadRegions(), api(`/api/personal/slides/${encodeURIComponent(s.id)}/view`, "POST")]);
+      await api(`/api/personal/slides/${encodeURIComponent(s.id)}/view`, "POST");
       if (sequence === detailSequence) status("", false, "#detail-status");
     } catch (e) { if (sequence === detailSequence) status(e.message, true, "#detail-status"); }
   }
@@ -263,7 +286,12 @@
   window.addEventListener("hashchange", route);
   $("#refresh").addEventListener("click", () => run(refresh));
   for (const selector of ["#slide-search", "#project-filter", "#slide-sort"]) $(selector).addEventListener("input", renderSlides);
-  $("#job-filter").addEventListener("change", renderJobs);
+  for (const selector of ["#job-filter", "#job-slide-filter", "#job-since", "#job-until"]) $(selector).addEventListener("change", () => {
+    jobCursor = null; jobPrevious = []; jobNext = null;
+    run(() => loadJobsPage(null, []));
+  });
+  $("#jobs-next").addEventListener("click", () => run(() => loadJobsPage(jobNext, [...jobPrevious, jobCursor])));
+  $("#jobs-previous").addEventListener("click", () => run(() => loadJobsPage(jobPrevious[jobPrevious.length - 1], jobPrevious.slice(0, -1))));
   $("#crops-search").addEventListener("input", renderCrops);
   $("#select-all").addEventListener("change", e => { for (const r of visibleCrops()) e.target.checked ? selected.add(r.filename) : selected.delete(r.filename); renderCrops(); });
   $("#download-crops").addEventListener("click", () => run(async () => { await downloadResponse(await fetch("/api/crops/batch-download", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ filenames: [...selected], include_manifest: true }) }), "wsi-patchkit-crops.zip"); }));
@@ -282,7 +310,8 @@
     await api(`/api/personal/slides/${encodeURIComponent(detail.id)}`, "PUT", data); status("切片资料已保存", false, "#detail-status"); await refresh();
   }, "#detail-status"); });
   $("#trash-slide").addEventListener("click", () => run(async () => {
-    const count = jobs.filter(j => j.slide_id === detail.id).length;
+    const result = await api(`/api/personal/jobs?${new URLSearchParams({slide_id: detail.id, limit: "1"})}`);
+    const count = Object.values(result.counts).reduce((a, b) => a + b, 0);
     if (!confirm(`将“${title(detail)}”移入回收站？关联 ${count} 个裁剪任务；裁剪结果保留。`)) return;
     await api(`/api/personal/slides/${encodeURIComponent(detail.id)}/trash`, "POST"); $("#slide-dialog").close(); status("已移入回收站，可随时恢复"); await refresh();
   }, "#detail-status"));

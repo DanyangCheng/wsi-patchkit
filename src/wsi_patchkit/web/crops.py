@@ -91,11 +91,18 @@ class CropJobQueue:
         *,
         worker_count: int = 1,
         store: PersonalStore | None = None,
+        history_days: int = 90,
+        history_limit: int = 5000,
     ) -> None:
         if worker_count < 1:
             raise ValueError("crop worker count must be positive")
+        if history_days < 1 or history_limit < 1:
+            raise ValueError("crop history limits must be positive")
         self._renderer = renderer
         self._store = store
+        self._history_days = history_days
+        self._history_limit = history_limit
+        self._cleanup_stop = threading.Event()
         self._output_dir = Path(output_dir)
         self._queue: queue.Queue[_CropJob | None] = queue.Queue()
         self._jobs: dict[str, _CropJob] = {}
@@ -106,13 +113,19 @@ class CropJobQueue:
             # Interrupted work stays visible and can be explicitly retried.
             with store.lock:
                 rows = store.db.execute(
-                    "SELECT owner, key, data FROM personal_records WHERE kind='job'"
+                    "SELECT owner, key, data FROM personal_records WHERE kind='job' "
+                    "AND json_extract(data, '$.status') IN ('queued','running')"
                 ).fetchall()
             for owner, key, encoded in rows:
                 record = json.loads(encoded)
                 if record["status"] in {"queued", "running"}:
-                    record.update(status="failed", error="服务重启中断了任务，请重试")
+                    record.update(
+                        status="failed",
+                        error="服务重启中断了任务，请重试",
+                        updated_at=time.time(),
+                    )
                     store.put(owner, "job", key, record)
+            self.cleanup_history()
         self._threads = tuple(
             threading.Thread(
                 target=self._worker,
@@ -123,6 +136,25 @@ class CropJobQueue:
         )
         for thread in self._threads:
             thread.start()
+        self._cleanup_thread = threading.Thread(
+            target=self._cleanup_loop, name="wsi-crop-history", daemon=True
+        )
+        self._cleanup_thread.start()
+
+    def cleanup_history(self) -> int:
+        if not self._store:
+            return 0
+        return self._store.prune_jobs(
+            cutoff=time.time() - self._history_days * 86400,
+            maximum=self._history_limit,
+        )
+
+    def _cleanup_loop(self) -> None:
+        while not self._cleanup_stop.wait(86400):
+            try:
+                self.cleanup_history()
+            except Exception:
+                _LOGGER.exception("Unable to clean crop history")
 
     @property
     def worker_count(self) -> int:
@@ -202,6 +234,12 @@ class CropJobQueue:
             return [j.public() for j in self._jobs.values() if j.namespace == namespace]
 
     def provenance_for(self, filenames: list[str], namespace: str | None = None):
+        if self._store:
+            return [
+                self._store.get(namespace or "local", "crop", name)
+                or {"filename": name, "provenance": "unknown_legacy_file"}
+                for name in filenames
+            ]
         latest = {}
         for job in self.list(namespace):
             if job["status"] == "completed":
@@ -215,12 +253,16 @@ class CropJobQueue:
         with self._lock:
             job = self._jobs.get(job_id)
             if job is None or job.namespace != namespace:
+                if self._store and self._store.get(namespace or "local", "job", job_id):
+                    raise RuntimeError("only queued jobs can be cancelled")
                 raise KeyError(job_id)
             if job.status != "queued":
                 raise RuntimeError("only queued jobs can be cancelled")
             job.status = "cancelled"
             self._reserved_filenames.discard((namespace, job.filename))
             self._record(job)
+            if self._store:
+                self._jobs.pop(job.job_id, None)
 
     def delete_saved_crops(
         self, filenames: list[str], *, namespace: str | None = None
@@ -237,6 +279,8 @@ class CropJobQueue:
                 raise FileNotFoundError("one or more crops do not exist")
             for path in paths:
                 path.unlink()
+                if self._store:
+                    self._store.delete(namespace or "local", "crop", path.name)
 
     def _worker(self) -> None:
         while True:
@@ -316,8 +360,12 @@ class CropJobQueue:
             job.error = error
             self._reserved_filenames.discard((job.namespace, job.filename))
             self._record(job)
+            if self._store:
+                self._jobs.pop(job.job_id, None)
 
     def close(self) -> None:
+        self._cleanup_stop.set()
+        self._cleanup_thread.join()
         with self._lock:
             if self._closed:
                 return

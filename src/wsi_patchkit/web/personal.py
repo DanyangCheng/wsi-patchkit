@@ -11,7 +11,7 @@ from io import BytesIO
 from pathlib import Path
 
 import numpy as np
-from fastapi import HTTPException, Request
+from fastapi import HTTPException, Query, Request
 from PIL import Image
 
 from .access import namespace, private_directory
@@ -119,7 +119,8 @@ def install_personal(
     async def overview(request: Request):
         slides = await list_slides(request)
         crops = list_crops(request)
-        jobs = crop_jobs.list(namespace(request))
+        recent_jobs = store.jobs_page(owner(request), limit=5)
+        job_counts = recent_jobs["counts"]
         uploads = []
         for slide_id in registry:
             source = registry[slide_id]
@@ -133,9 +134,10 @@ def install_personal(
             "upload_bytes": sum(p.stat().st_size for p in uploads if p.is_file()),
             "crop_bytes": sum(c["size_bytes"] for c in crops),
             "jobs": {
-                s: sum(j["status"] == s for j in jobs)
+                s: job_counts.get(s, 0)
                 for s in ("queued", "running", "completed", "failed", "cancelled")
             },
+            "recent_jobs": recent_jobs["items"],
             "max_upload_bytes": max_upload_bytes,
             "pending_bytes": sum(
                 path.stat().st_size
@@ -242,8 +244,33 @@ def install_personal(
         return {"ok": True}
 
     @app.get("/api/personal/jobs")
-    async def jobs(request: Request):
-        return crop_jobs.list(namespace(request))
+    def jobs(
+        request: Request,
+        limit: int = Query(20, ge=1, le=100),
+        cursor: str | None = Query(None, max_length=1024),
+        slide_id: str | None = None,
+        status: str | None = Query(
+            None, pattern="^(queued|running|completed|failed|cancelled)$"
+        ),
+        since: float | None = Query(None, ge=0, allow_inf_nan=False),
+        until: float | None = Query(None, ge=0, allow_inf_nan=False),
+        active_first: bool = False,
+    ):
+        if since is not None and until is not None and since > until:
+            raise HTTPException(400, "invalid job time range")
+        try:
+            return store.jobs_page(
+                owner(request),
+                limit=limit,
+                cursor=cursor,
+                slide_id=slide_id,
+                status=status,
+                since=since,
+                until=until,
+                active_first=active_first,
+            )
+        except ValueError as error:
+            raise HTTPException(400, "invalid job cursor") from error
 
     @app.post("/api/personal/jobs/{job_id}/cancel")
     async def cancel(job_id: str, request: Request):

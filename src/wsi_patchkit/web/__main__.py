@@ -360,7 +360,21 @@ def main() -> None:
         metavar="N",
         help="number of background crop workers (default: 1)",
     )
+    parser.add_argument(
+        "--crop-history-days",
+        type=int,
+        default=90,
+        help="retain ended crop jobs for this many days (default: 90)",
+    )
+    parser.add_argument(
+        "--crop-history-limit",
+        type=int,
+        default=5000,
+        help="maximum retained ended jobs per account (default: 5000)",
+    )
     args = parser.parse_args()
+    if args.crop_history_days < 1 or args.crop_history_limit < 1:
+        parser.error("crop history limits must be positive")
     if bool(args.ssl_certfile) != bool(args.ssl_keyfile):
         parser.error("--ssl-certfile and --ssl-keyfile must be provided together")
     for tls_file in (args.ssl_certfile, args.ssl_keyfile):
@@ -464,6 +478,8 @@ def main() -> None:
         upload_dir=args.upload_dir,
         max_upload_bytes=args.max_upload_gb * 1024**3,
         crop_workers=args.crop_workers,
+        crop_history_days=args.crop_history_days,
+        crop_history_limit=args.crop_history_limit,
         slide_scanner=scanner if directories else None,
     )
     if args.debug_stack_interval:

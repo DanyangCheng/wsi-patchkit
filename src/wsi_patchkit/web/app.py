@@ -271,6 +271,8 @@ def create_app(
     cache_control: str = "private, max-age=3600",
     crop_output_dir: str | Path = "crops",
     crop_workers: int = 1,
+    crop_history_days: int = 90,
+    crop_history_limit: int = 5000,
     slide_scanner: SlideDirectoryScanner | None = None,
     upload_dir: str | Path = "uploads",
     max_upload_bytes: int = 32 * 1024**3,
@@ -285,6 +287,8 @@ def create_app(
         raise ValueError("provide reader or reader_factory, not both")
     if crop_workers < 1:
         raise ValueError("crop_workers must be positive")
+    if crop_history_days < 1 or crop_history_limit < 1:
+        raise ValueError("crop history limits must be positive")
     if max_upload_bytes < 1:
         raise ValueError("max_upload_bytes must be positive")
     default_mpp = None if source_mpp is None else as_mpp(source_mpp, name="source_mpp")
@@ -360,6 +364,8 @@ def create_app(
         crop_directory,
         worker_count=crop_workers,
         store=personal_store,
+        history_days=crop_history_days,
+        history_limit=crop_history_limit,
     )
     overlay_renderer = OverlayRenderer(
         reader_pool_size=reader_pool_size,
@@ -638,6 +644,11 @@ def create_app(
                 }
             )
         records.sort(key=lambda record: str(record["modified_at"]), reverse=True)
+        provenance = crop_jobs.provenance_for(
+            [record["filename"] for record in records], namespace(request)
+        )
+        for record, source in zip(records, provenance, strict=True):
+            record["source"] = source
         return records
 
     @app.get("/api/crops/{filename}/thumbnail", name="crop_thumbnail")
@@ -1267,6 +1278,8 @@ def create_app(
     install_personal(
         app,
         store=personal_store,
+        history_days=crop_history_days,
+        history_limit=crop_history_limit,
         registry=registry,
         uploaded_sources=uploaded_sources,
         upload_directory=upload_directory,
