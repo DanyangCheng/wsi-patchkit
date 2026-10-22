@@ -23,6 +23,7 @@ from typing import Any, TypeVar
 import numpy as np
 import tifffile
 from PIL import Image, JpegImagePlugin
+from tqdm import tqdm
 
 from .io._color import image_to_rgb
 from .io.kfbslide import KfbSlideReader
@@ -130,6 +131,7 @@ def convert_kfb_to_tiff(
     overwrite: bool = False,
     index_cache_dir: str | Path | None = None,
     progress: Callable[[str], None] | None = None,
+    tile_progress: Callable[[int, int], None] | None = None,
 ) -> ConversionResult:
     """Convert without materializing a full slide or sharing reader handles.
 
@@ -137,6 +139,7 @@ def convert_kfb_to_tiff(
     encoded with Pillow. ``reencode`` applies ``quality`` to every tile.
     Deflate and none preserve pixels returned by KfbSlideReader. Associated
     label/macro images are not exported. Output is always tiled BigTIFF.
+    ``tile_progress(completed, total)`` reports tiles across all exported levels.
     """
     if workers < 1 or (buffer_tiles is not None and buffer_tiles < 1):
         raise ValueError("workers and buffer_tiles must be positive")
@@ -203,6 +206,13 @@ def convert_kfb_to_tiff(
             tile = tile_size or (
                 native_tile if native_tile >= 16 and native_tile % 16 == 0 else 512
             )
+            total_tiles = sum(
+                math.ceil(level.dimensions[0] / tile)
+                * math.ceil(level.dimensions[1] / tile)
+                for level in levels
+            )
+            if tile_progress:
+                tile_progress(0, total_tiles)
             limit = buffer_tiles if buffer_tiles is not None else workers * 2
             executor = None
             if workers > 1:
@@ -298,6 +308,8 @@ def convert_kfb_to_tiff(
                                 f"{width}x{height}, {count}/{total} tiles"
                             )
                             last_report = now
+                        if tile_progress:
+                            tile_progress(completed, total_tiles)
                         yield data
 
                 resolution = (
@@ -415,9 +427,36 @@ def main(argv: list[str] | None = None) -> int:
     if len(set(destinations)) != len(destinations):
         parser.error("multiple inputs map to the same TIFF output")
     failures = 0
+    progress_lock = threading.RLock()
+    slots = deque(range(min(args.jobs, len(tasks))))
+    finished = failed = 0
+    bars = [
+        tqdm(
+            total=0,
+            desc="Waiting",
+            unit="tile",
+            position=slot if sys.stderr.isatty() else 0,
+            dynamic_ncols=True,
+            postfix=f"slides 0/{len(tasks)}",
+        )
+        for slot in slots
+    ]
 
     def convert_task(task: tuple[Path, Path]) -> bool:
+        nonlocal finished, failed
         source, output = task
+        with progress_lock:
+            slot = slots.popleft()
+            bar = bars[slot]
+            bar.set_description_str(source.name, refresh=False)
+            bar.reset(total=0)
+        success = False
+
+        def report_tiles(completed: int, total: int) -> None:
+            if bar.total != total:
+                bar.reset(total=total)
+            bar.update(completed - bar.n)
+
         try:
             result = convert_kfb_to_tiff(
                 source,
@@ -432,28 +471,44 @@ def main(argv: list[str] | None = None) -> int:
                 level0_only=args.level0_only,
                 overwrite=args.overwrite,
                 index_cache_dir=args.index_cache_dir,
-                progress=lambda message: print(message, file=sys.stderr, flush=True),
+                tile_progress=report_tiles,
             )
-            print(
+            tqdm.write(
                 f"OK {result.output}: {result.seconds:.2f}s, "
                 f"{result.output_bytes / 1024**2:.1f} MiB, "
                 f"{result.copied_tiles}/{result.tiles} tiles copied "
                 "without re-encoding",
-                flush=True,
+                file=sys.stdout,
             )
+            success = True
             return True
         except Exception as error:
-            print(f"FAILED {source}: {error}", file=sys.stderr, flush=True)
+            tqdm.write(f"FAILED {source}: {error}", file=sys.stderr)
             return False
+        finally:
+            with progress_lock:
+                finished += 1
+                failed += not success
+                for current in bars:
+                    current.set_postfix_str(
+                        f"slides {finished}/{len(tasks)}, failed {failed}"
+                    )
+                slots.append(slot)
 
-    if args.jobs == 1:
-        failures = sum(not convert_task(task) for task in tasks)
-    else:
-        with ThreadPoolExecutor(max_workers=args.jobs) as executor:
-            failures = sum(
-                not success
-                for success in _bounded_map(executor, convert_task, tasks, args.jobs)
-            )
+    try:
+        if args.jobs == 1:
+            failures = sum(not convert_task(task) for task in tasks)
+        else:
+            with ThreadPoolExecutor(max_workers=args.jobs) as executor:
+                failures = sum(
+                    not success
+                    for success in _bounded_map(
+                        executor, convert_task, tasks, args.jobs
+                    )
+                )
+    finally:
+        for bar in reversed(bars):
+            bar.close()
     return int(failures > 0)
 
 

@@ -45,8 +45,12 @@ uv run kfb-to-tiff D:/slides/sample.kfb D:/tiff/sample.tiff --compression deflat
 增加线程不一定更快。机械硬盘、网络共享尤其需要根据实际读写速度调整。
 实际速度还受切片尺寸、索引首次构建、异常块修复和磁盘性能影响。
 
-进度会显示每层已完成的块数。完成后输出耗时、文件大小和直接复制的块数，
-可据此判断是否走到了快速路径。
+转换时显示单张切片的进度条，按所有待导出金字塔层的总块数计算百分比，
+同时显示块数、处理速度和预计剩余时间。进度条旁的 `slides 2/10, failed 0`
+表示已处理 2 张、共 10 张，其中失败 0 张；失败的切片也计入已处理数量。
+`--jobs` 并行转换时，每张正在处理的切片各占一条进度条。首次构建索引期间，
+尚未确定总块数，进度条会先显示文件名，随后开始更新块进度。
+完成后输出耗时、文件大小和直接复制的块数，可据此判断是否走到了快速路径。
 
 本机合成数据测试：4096 × 4096 RGB 图像、256 个 256 × 256 JPEG 块、
 KFB 文件约 18.9 MiB。以下时间包含 TIFF 写入；第一次复制还包含索引构建，
@@ -115,3 +119,7 @@ result = convert_kfb_to_tiff(
 )
 print(result.seconds, result.copied_tiles, result.tiles)
 ```
+
+Python API 可通过 `tile_progress=callback` 接收数值进度：
+`callback(completed, total)` 在读取元数据后先收到 `(0, total)`，随后随 TIFF
+消费瓦片逐块更新。`total` 包含所有导出层，使用 `level0_only=True` 时只统计最高分辨率层。

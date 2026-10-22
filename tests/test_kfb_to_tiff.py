@@ -223,7 +223,7 @@ def test_retiling_and_level0_only(tmp_path):
         )
 
 
-def test_batch_cli_preserves_subdirectories_and_reports_errors(tmp_path):
+def test_batch_cli_preserves_subdirectories_and_reports_errors(tmp_path, capsys):
     source, output = tmp_path / "input", tmp_path / "output"
     _write_kfb(source / "a.kfb")
     _write_kfb(source / "nested" / "a.KFB")
@@ -245,7 +245,26 @@ def test_batch_cli_preserves_subdirectories_and_reports_errors(tmp_path):
     )
     assert (output / "a.tiff").is_file()
     assert (output / "nested" / "a.tiff").is_file()
+    assert "slides 2/2, failed 0" in capsys.readouterr().err
     assert main([str(source), str(output), "--compression", "none"]) == 1
+    assert "slides 1/1, failed 1" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("level0_only, total", [(False, 24), (True, 20)])
+def test_tile_progress_spans_exported_levels(tmp_path, level0_only, total):
+    source, output = tmp_path / "slide.kfb", tmp_path / "slide.tiff"
+    _write_kfb(source)
+    updates = []
+    result = convert_kfb_to_tiff(
+        source,
+        output,
+        workers=3,
+        compression="none",
+        level0_only=level0_only,
+        tile_progress=lambda completed, count: updates.append((completed, count)),
+    )
+    assert updates == [(completed, total) for completed in range(total + 1)]
+    assert result.tiles == total
 
 
 def test_bounded_map_does_not_eagerly_submit_entire_slide():

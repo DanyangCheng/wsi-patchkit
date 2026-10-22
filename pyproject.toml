@@ -30,6 +30,7 @@ dependencies = [
   "openslide-bin>=4.0",
   "pytest>=9.1.1",
   "kfbslide>0.3.3",
+  "tqdm>=4.70.1",
 ]
 
 [project.optional-dependencies]
