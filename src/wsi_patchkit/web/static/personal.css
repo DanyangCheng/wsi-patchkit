@@ -148,3 +148,21 @@ main > [data-panel]:focus-visible {
     grid-template-rows: auto minmax(0, 1fr);
   }
 }
+
+/* Keep each crop control together when zoom or viewport width changes. */
+.crops-tools > input[type=search] {
+  flex: 1 1 100%;
+  min-width: 0;
+  width: 100%;
+}
+.crops-tools > label {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  max-width: 100%;
+  white-space: nowrap;
+}
+.crops-tools select { min-width: 0; flex: 1; }
+.crops-tools > button { flex-shrink: 0; white-space: nowrap; }
+#crops-grid { grid-template-columns: repeat(auto-fill, minmax(min(240px, 100%), 1fr)); }

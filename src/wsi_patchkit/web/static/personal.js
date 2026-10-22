@@ -105,7 +105,7 @@
       body.append(node("h2", title(s)), node("p", `${bytes(s.size_bytes)} · ${s.uploaded ? "个人上传" : "共享切片"}`));
       for (const t of [s.project, ...s.tags].filter(Boolean)) body.append(node("span", t, "badge"));
       const actions = node("div", undefined, "actions"); actions.append(action("切片详情", () => openDetail(s)), link("查看与裁剪", viewerLink(s.id)));
-      body.append(actions); c.append(image, body); return c;
+      c.append(image, body); return c;
     });
     $("#slide-grid").replaceChildren(...cards);
     if (!cards.length) empty($("#slide-grid"), "没有匹配的切片。可以调整搜索或上传切片。");
@@ -175,11 +175,9 @@
       checkbox.addEventListener("change", () => { checkbox.checked ? selected.add(r.filename) : selected.delete(r.filename); selectionInfo(); }); label.append(checkbox, document.createTextNode(" 选择"));
       body.append(label, node("h2", r.filename), node("p", `${bytes(r.size_bytes)} · ${date(r.modified_at)}`));
       const j = r.source?.slide_id ? r.source : null;
-      const actions = node("div", undefined, "actions"); actions.append(link("下载", r.download_url));
-      if (r.export_url) actions.append(link("下载图像与标签", window.patchkitExports.url(r.export_url)));
-      if (j) { body.append(node("p", `Level ${j.level} · (${j.region.x}, ${j.region.y}) · ${j.region.width} × ${j.region.height}`)); actions.append(link("定位来源", viewerLink(j.slide_id, j))); }
+      if (j) { body.append(node("p", `Level ${j.level} · (${j.region.x}, ${j.region.y}) · ${j.region.width} × ${j.region.height}`)); }
       else body.append(node("p", "历史图像：来源坐标未记录"));
-      body.append(actions); c.append(image, body); return c;
+      c.append(image, body); return c;
     }));
     if (!filtered.length) empty($("#crops-grid"), "还没有匹配的裁剪结果。");
     selectionInfo();

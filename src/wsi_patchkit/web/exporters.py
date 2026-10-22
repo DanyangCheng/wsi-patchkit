@@ -42,6 +42,10 @@ def export_indexed_png(bundle: CropBundle, archive: ZipFile) -> None:
         )
 
 
+def export_none(bundle: CropBundle, archive: ZipFile) -> None:
+    """Leave the archive with its images and optional coordinate manifest."""
+
+
 class ExporterRegistry:
     """Register trusted server-side adapters: callable(CropBundle, ZipFile).
 
@@ -54,6 +58,7 @@ class ExporterRegistry:
             str, tuple[str, Callable[[CropBundle, ZipFile], None]]
         ] = {}
         self.register("indexed-png", export_indexed_png, name="类别索引 PNG")
+        self.register("none", export_none, name="无")
 
     def register(self, format_id: str, exporter, *, name: str) -> None:
         if not isinstance(format_id, str) or not re.fullmatch(

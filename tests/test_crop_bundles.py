@@ -142,6 +142,21 @@ async def test_bundle_masks_metadata_export_and_delete(tmp_path, target_mpp, siz
             assert "sample.png.labels/layer-0/mask.png" in archive.namelist()
             assert "sample.png.labels/metadata.json" in archive.namelist()
 
+        response = await client.post(
+            "/api/crops/batch-download",
+            json={
+                "filenames": ["sample.png"],
+                "label_format": "none",
+                "include_manifest": True,
+            },
+        )
+        assert response.status_code == 200
+        with ZipFile(BytesIO(response.content)) as archive:
+            assert set(archive.namelist()) == {"sample.png", "manifest.json"}
+            assert archive.read("sample.png") == (output / "sample.png").read_bytes()
+        # An image-only export keeps the saved labels for subsequent exports.
+        assert (bundle / "layer-0/mask.png").is_file()
+
         def custom(bundle, archive):
             archive.writestr(
                 bundle.labels.name + "/custom.txt",

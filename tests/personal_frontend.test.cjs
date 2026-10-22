@@ -93,7 +93,7 @@ function screen({ jobRecords = [], source = null } = {}) {
       }
       const data = {
         "/api/crops": crops,
-        "/api/crops/exporters": [{id: "indexed-png", name: "类别索引 PNG"}, {id: "custom", name: "Custom"}],
+        "/api/crops/exporters": [{id: "indexed-png", name: "类别索引 PNG"}, {id: "none", name: "无"}, {id: "custom", name: "Custom"}],
         "/api/personal/slides": [], "/api/personal/jobs": [],
         "/api/personal/trash": [], "/api/personal/uploads": [],
         "/api/personal/account": { enabled: false },
@@ -133,7 +133,7 @@ test("crop management initializes, filters, downloads and deletes selected crops
   assert.match(get("#selection-count").textContent, /已选 1 张/);
   await get("#download-crops").dispatch("click");
   const download = page.requests.find(r => r.endpoint === "/api/crops/batch-download");
-  assert.deepEqual(JSON.parse(download.options.body), { filenames: ["alpha.png"], include_manifest: true, label_format: "indexed-png" });
+  assert.deepEqual(JSON.parse(download.options.body), { filenames: ["alpha.png"], include_manifest: true, label_format: "none" });
   assert.equal(page.downloads[0].filename, "wsi-patchkit-crops.zip");
 
   get("#crops-search").value = "";
@@ -167,11 +167,15 @@ test("task records paginate on the server and reset the cursor on filter changes
   assert.equal(params.get("cursor"), null);
 });
 
-test("crop source links remain available without their task history", async () => {
+test("crop cards retain source coordinates and have no per-image actions", async () => {
   const page = screen({source: {slide_id: "slide", level: 0, region: {x: 1, y: 2, width: 8, height: 8}}});
   await settle();
   const grid = page.controls.get("#crops-grid");
-  assert.match(grid.textContent, /定位来源/);
+  assert.match(grid.textContent, /Level 0 · \(1, 2\) · 8 × 8/);
+  for (const card of grid.children) {
+    const body = card.children.find(c => c.className === "card-body");
+    assert.equal(body.children.some(c => c.className === "actions" || c.tag === "a" || c.tag === "button"), false);
+  }
   assert.doesNotMatch(grid.textContent, /来源坐标未记录/);
 });
 
@@ -179,12 +183,10 @@ test("crop source links remain available without their task history", async () =
 test("registered label formats are selectable for bundle downloads", async () => {
   const page = screen(), get = selector => page.controls.get(selector);
   await settle();
-  assert.deepEqual(get("#crop-label-format").options.map(o => o.value), ["indexed-png", "custom"]);
+  assert.deepEqual(get("#crop-label-format").options.map(o => o.value), ["indexed-png", "none", "custom"]);
+  assert.equal(get("#crop-label-format").value, "none");
   get("#crop-label-format").value = "custom";
   await get("#crop-label-format").dispatch("change");
-  const card = get("#crops-grid").children[0];
-  const actions = card.children.find(c => c.className === "card-body").children.find(c => c.className === "actions");
-  assert.equal(actions.children.find(c => c.textContent === "下载图像与标签").href, "/api/crops/alpha.png/export?label_format=custom");
   get("#select-all").checked = true;
   await get("#select-all").dispatch("change");
   await get("#download-crops").dispatch("click");
