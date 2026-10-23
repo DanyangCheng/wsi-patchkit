@@ -46,15 +46,16 @@
       </section>
 
       <section class="selection-toolbar" aria-label="批量操作">
-        <label>标签格式<select id="crop-label-format"><option value="indexed-png">类别索引 PNG</option></select></label>
+        <label>标签格式<select id="crop-label-format"><option value="segmentation-mask">Segmentation Mask 1.1</option><option value="indexed-png">类别索引 PNG</option></select></label>
         <label class="select-visible">
           <input id="select-visible-crops" type="checkbox" />
           <span>全选</span>
         </label>
         <span id="selected-crop-count" class="selected-count">已选 0 张</span>
         <div class="bulk-actions">
+          <button id="download-selected-labels" class="action-button" type="button" disabled>下载标注包</button>
           <button id="download-selected-crops" class="action-button" type="button" disabled>
-            下载
+            下载原图包
           </button>
           <button id="delete-selected-crops" class="delete-button" type="button" disabled>
             删除

@@ -14,6 +14,7 @@
   const selectVisible = document.querySelector("#select-visible-crops");
   const selectedCount = document.querySelector("#selected-crop-count");
   const downloadSelectedButton = document.querySelector("#download-selected-crops");
+  const downloadLabelsButton = document.querySelector("#download-selected-labels");
   const deleteSelectedButton = document.querySelector("#delete-selected-crops");
 
   let crops = [];
@@ -124,7 +125,7 @@
       const bundle = document.createElement("a");
       bundle.className = "action-button";
       bundle.href = window.patchkitExports.url(crop.export_url);
-      bundle.textContent = "下载图像与标签";
+      bundle.textContent = "下载标注包";
       actions.append(bundle);
     }
     actions.append(remove);
@@ -144,6 +145,7 @@
     selectVisible.checked = visibleCrops.length > 0 && selectedVisibleCount === visibleCrops.length;
     selectVisible.indeterminate = selectedVisibleCount > 0 && selectedVisibleCount < visibleCrops.length;
     selectVisible.disabled = visibleCrops.length === 0;
+    downloadLabelsButton.disabled = selection.length === 0 || deletingCrops;
     downloadSelectedButton.disabled = selection.length === 0 || deletingCrops;
     deleteSelectedButton.disabled = selection.length === 0 || deletingCrops;
     for (const button of cropGrid.querySelectorAll(".delete-button")) {
@@ -214,14 +216,14 @@
     }
   }
 
-  async function downloadCrops(filenames) {
+  async function downloadCrops(filenames, labels = false) {
     if (!filenames.length) return;
-    downloadSelectedButton.disabled = true;
+    downloadSelectedButton.disabled = downloadLabelsButton.disabled = true;
     setStatus(`正在打包下载 ${filenames.length} 张裁剪图…`);
     try {
       const response = await fetch("/api/crops/batch-download", {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ filenames, include_manifest: true, label_format: window.patchkitExports.format() }),
+        body: JSON.stringify({ filenames, include_images: !labels, label_format: labels ? window.patchkitExports.format() : "none" }),
       });
       if (!response.ok) {
         const result = await response.json();
@@ -229,10 +231,10 @@
       }
       const url = URL.createObjectURL(await response.blob());
       const link = document.createElement("a");
-      link.href = url; link.download = "wsi-patchkit-crops.zip";
+      link.href = url; link.download = labels ? "wsi-patchkit-annotations.zip" : "wsi-patchkit-images.zip";
       document.body.append(link); link.click(); link.remove();
       setTimeout(() => URL.revokeObjectURL(url), 30000);
-      setStatus(`已打包 ${filenames.length} 张裁剪图和坐标清单`);
+      setStatus(`已打包 ${filenames.length} 张裁剪的${labels ? "标注" : "原图"}`);
     } catch (error) {
       setStatus(`下载失败：${error.message}`, "error");
     } finally { updateSelectionControls(); }
@@ -271,6 +273,7 @@
   deleteSelectedButton.addEventListener("click", () => {
     deleteCrops([...selectedCrops]);
   });
+  downloadLabelsButton.addEventListener("click", () => downloadCrops([...selectedCrops], true));
   window.patchkitExports.load(renderCrops).catch(error => setStatus(error.message, "error"));
   loadCrops();
 })();

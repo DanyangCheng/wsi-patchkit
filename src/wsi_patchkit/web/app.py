@@ -590,6 +590,7 @@ def create_app(
         owner: str | None = None,
         include_manifest: bool = False,
         label_format: str = "indexed-png",
+        include_images: bool = True,
     ) -> str:
         descriptor, archive_name = tempfile.mkstemp(
             prefix=".crop-download-",
@@ -599,13 +600,15 @@ def create_app(
         os.close(descriptor)
         try:
             with ZipFile(archive_name, "w", compression=ZIP_STORED) as archive:
+                bundles = []
                 for filename in filenames:
                     image = saved_crop_path(filename, owner)
-                    archive.write(image, arcname=filename)
-                    exporters.get(label_format)(
-                        CropBundle(image, image.with_name(filename + ".labels")),
-                        archive,
+                    if include_images:
+                        archive.write(image, arcname=filename)
+                    bundles.append(
+                        CropBundle(image, image.with_name(filename + ".labels"))
                     )
+                exporters.export_many(label_format, bundles, archive)
                 if include_manifest:
                     records = crop_jobs.provenance_for(filenames, owner)
                     archive.writestr(
@@ -620,6 +623,9 @@ def create_app(
                             indent=2,
                         ),
                     )
+        except ValueError as error:
+            Path(archive_name).unlink(missing_ok=True)
+            raise HTTPException(400, str(error)) from error
         except Exception:
             Path(archive_name).unlink(missing_ok=True)
             raise
@@ -709,7 +715,10 @@ def create_app(
 
     @app.get("/api/crops/{filename}/export")
     async def export_crop(
-        filename: str, request: Request, label_format: str = "indexed-png"
+        filename: str,
+        request: Request,
+        label_format: str = "indexed-png",
+        include_images: bool = True,
     ):
         saved_crop_path(filename, namespace(request))
         try:
@@ -717,7 +726,12 @@ def create_app(
         except ValueError as error:
             raise HTTPException(400, str(error)) from error
         archive_name = await asyncio.to_thread(
-            create_crop_archive, [filename], namespace(request), True, label_format
+            create_crop_archive,
+            [filename],
+            namespace(request),
+            True,
+            label_format,
+            include_images,
         )
         return FileResponse(
             archive_name,
@@ -739,6 +753,7 @@ def create_app(
                 payload = {
                     "filenames": json.loads(encoded_filenames[0]),
                     "label_format": form.get("label_format", ["indexed-png"])[0],
+                    "include_images": form.get("include_images", ["true"])[0] == "true",
                 }
             elif content_type == "application/json":
                 payload = await request.json()
@@ -753,6 +768,9 @@ def create_app(
             raise HTTPException(status_code=400, detail="invalid crop download request")
         filenames = crop_filenames(payload, namespace(request))
         label_format = payload.get("label_format", "indexed-png")
+        include_images = payload.get("include_images", True)
+        if not isinstance(include_images, bool):
+            raise HTTPException(400, "include_images must be a boolean")
         try:
             exporters.get(label_format)
         except ValueError as error:
@@ -763,6 +781,7 @@ def create_app(
             namespace(request),
             payload.get("include_manifest") is True,
             label_format,
+            include_images,
         )
         return FileResponse(
             archive_name,

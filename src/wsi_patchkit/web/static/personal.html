@@ -3,8 +3,8 @@
 <head>
   <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
   <title>个人工作台 · WSI PatchKit</title>
-  <link rel="stylesheet" href="/static/personal.css?v=3">
-  <script src="/static/auth.js" defer></script><script src="/static/crop-exports.js?v=2" defer></script><script src="/static/personal.js?v=7" defer></script>
+  <link rel="stylesheet" href="/static/personal.css?v=4">
+  <script src="/static/auth.js" defer></script><script src="/static/crop-exports.js?v=2" defer></script><script src="/static/personal.js?v=8" defer></script>
 </head>
 <body>
 <header class="topbar">
@@ -43,8 +43,9 @@
       <div class="tools crops-tools">
         <input id="crops-search" type="search" placeholder="搜索裁剪结果" aria-label="搜索裁剪结果">
         <label><input id="select-all" type="checkbox"> 全选当前结果</label>
-        <label>标签格式<select id="crop-label-format"><option value="none">无</option><option value="indexed-png">类别索引 PNG</option></select></label>
-        <button id="download-crops">打包下载</button>
+        <label>标签格式<select id="crop-label-format"><option value="segmentation-mask">Segmentation Mask 1.1</option><option value="indexed-png">类别索引 PNG</option></select></label>
+        <button id="download-crops">下载原图包</button>
+        <button id="download-crop-labels">下载标注包</button>
         <button id="download-manifest" class="secondary">导出坐标清单</button>
         <button id="delete-crops" class="danger">删除所选</button>
       </div>
@@ -59,6 +60,16 @@
     </section>
   </main>
 </div>
+<dialog id="crop-detail-dialog" class="crop-detail-drawer" aria-labelledby="crop-detail-title">
+  <div class="crop-detail-heading"><h2>裁剪详情</h2><button id="close-crop-detail" class="secondary" type="button" aria-label="关闭裁剪详情" autofocus>✕</button></div>
+  <div class="crop-detail-content">
+    <img id="crop-detail-preview" alt="" decoding="async">
+    <h3 id="crop-detail-title"></h3>
+    <dl id="crop-detail-info"></dl>
+    <p id="crop-source-status" class="muted"></p>
+    <a id="crop-locate-source" class="primary" target="_blank" rel="noopener noreferrer" hidden>定位来源 ↗</a>
+  </div>
+</dialog>
 <dialog id="slide-dialog" aria-labelledby="detail-title"><div class="dialog-heading"><div><p class="eyebrow">SLIDE DETAIL</p><h2 id="detail-title"></h2></div><button id="close-detail" class="secondary" aria-label="关闭详情">✕</button></div>
   <div class="detail-columns"><div><img id="slide-preview" class="slide-preview" alt="切片预览"><dl id="slide-info"></dl><a id="open-viewer" class="primary">在查看器中裁剪 ↗</a></div>
   <div><form id="slide-form"><h3>切片资料</h3><label>项目<input name="project" maxlength="200"></label><label>标签（逗号分隔）<input name="tags" maxlength="1000"></label><label>备注<textarea name="notes" maxlength="4000" rows="3"></textarea></label><button class="secondary">保存切片资料</button></form><button id="trash-slide" class="danger">移入回收站</button><p id="detail-status" role="status" aria-live="polite"></p></div></div>

@@ -105,7 +105,7 @@
       body.append(node("h2", title(s)), node("p", `${bytes(s.size_bytes)} · ${s.uploaded ? "个人上传" : "共享切片"}`));
       for (const t of [s.project, ...s.tags].filter(Boolean)) body.append(node("span", t, "badge"));
       const actions = node("div", undefined, "actions"); actions.append(action("切片详情", () => openDetail(s)), link("查看与裁剪", viewerLink(s.id)));
-      c.append(image, body); return c;
+      body.append(actions); c.append(image, body); return c;
     });
     $("#slide-grid").replaceChildren(...cards);
     if (!cards.length) empty($("#slide-grid"), "没有匹配的切片。可以调整搜索或上传切片。");
@@ -177,17 +177,46 @@
       const j = r.source?.slide_id ? r.source : null;
       if (j) { body.append(node("p", `Level ${j.level} · (${j.region.x}, ${j.region.y}) · ${j.region.width} × ${j.region.height}`)); }
       else body.append(node("p", "历史图像：来源坐标未记录"));
-      c.append(image, body); return c;
+      const preview = node("button", undefined, "crop-preview-button");
+      preview.type = "button";
+      preview.setAttribute("aria-label", `查看 ${r.filename} 的详情`);
+      preview.setAttribute("aria-haspopup", "dialog");
+      preview.setAttribute("aria-controls", "crop-detail-dialog");
+      preview.addEventListener("click", () => openCropDetail(r));
+      preview.append(image); c.append(preview, body); return c;
     }));
     if (!filtered.length) empty($("#crops-grid"), "还没有匹配的裁剪结果。");
     selectionInfo();
+  }
+  function openCropDetail(crop) {
+    const dialog = $("#crop-detail-dialog");
+    $("#crop-detail-title").textContent = crop.filename;
+    const preview = $("#crop-detail-preview");
+    preview.src = crop.image_url; preview.alt = crop.filename;
+    const source = crop.source;
+    const slide = slides.find(s => s.id === source?.slide_id);
+    const items = [["文件大小", bytes(crop.size_bytes)], ["保存时间", date(crop.modified_at)]];
+    if (source?.slide_id) {
+      items.push(["来源切片", slide ? title(slide) : source.slide_id], ["层级", `Level ${source.level}`]);
+      if (source.region) items.push(["裁剪坐标", `(${source.region.x}, ${source.region.y})`], ["裁剪尺寸", `${source.region.width} × ${source.region.height}`]);
+    }
+    info("#crop-detail-info", items);
+    const locate = $("#crop-locate-source");
+    locate.hidden = !slide || !source?.region;
+    locate.removeAttribute("href");
+    if (!locate.hidden) locate.href = viewerLink(source.slide_id, source);
+    $("#crop-source-status").textContent = !source?.slide_id || !source.region
+      ? "未记录来源坐标，无法定位来源。"
+      : !slide ? "来源切片当前不可访问，可能已移入回收站、删除或无访问权限。"
+      : "在新标签页中打开来源切片并定位裁剪区域。";
+    dialog.showModal();
   }
   function selectionInfo() {
     const visible = visibleCrops(), count = visible.filter(r => selected.has(r.filename)).length;
     $("#selection-count").textContent = `共 ${crops.length} 张 · 已选 ${selected.size} 张`;
     $("#select-all").checked = visible.length > 0 && count === visible.length;
     $("#select-all").indeterminate = count > 0 && count < visible.length;
-    $("#download-crops").disabled = $("#delete-crops").disabled = selected.size === 0;
+    $("#download-crop-labels").disabled = $("#download-crops").disabled = $("#delete-crops").disabled = selected.size === 0;
   }
   async function downloadResponse(response, filename) {
     if (!response.ok) { const result = await response.json(); throw new Error(result.detail || "下载失败"); }
@@ -293,7 +322,15 @@
   $("#jobs-previous").addEventListener("click", () => run(() => loadJobsPage(jobPrevious[jobPrevious.length - 1], jobPrevious.slice(0, -1))));
   $("#crops-search").addEventListener("input", renderCrops);
   $("#select-all").addEventListener("change", e => { for (const r of visibleCrops()) e.target.checked ? selected.add(r.filename) : selected.delete(r.filename); renderCrops(); });
-  $("#download-crops").addEventListener("click", () => run(async () => { await downloadResponse(await fetch("/api/crops/batch-download", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ filenames: [...selected], include_manifest: true, label_format: window.patchkitExports.format() }) }), "wsi-patchkit-crops.zip"); }));
+  async function downloadCropPackage(labels) {
+    await downloadResponse(await fetch("/api/crops/batch-download", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ filenames: [...selected], include_images: !labels,
+        label_format: labels ? window.patchkitExports.format() : "none" }),
+    }), labels ? "wsi-patchkit-annotations.zip" : "wsi-patchkit-images.zip");
+  }
+  $("#download-crops").addEventListener("click", () => run(() => downloadCropPackage(false)));
+  $("#download-crop-labels").addEventListener("click", () => run(() => downloadCropPackage(true)));
   $("#download-manifest").addEventListener("click", () => run(async () => {
     const manifest = await api("/api/personal/manifest");
     if (selected.size) manifest.crops = manifest.crops.filter(j => selected.has(j.filename));
@@ -303,6 +340,13 @@
     if (!selected.size || !confirm(`永久删除所选 ${selected.size} 张裁剪图？`)) return;
     await api("/api/crops/batch-delete", "POST", { filenames: [...selected] }); selected.clear(); await refresh();
   }));
+  $("#close-crop-detail").addEventListener("click", () => $("#crop-detail-dialog").close());
+  $("#crop-detail-dialog").addEventListener("click", event => {
+    const dialog = event.currentTarget;
+    if (event.target !== dialog) return;
+    const bounds = dialog.getBoundingClientRect();
+    if (event.clientX < bounds.left || event.clientX > bounds.right || event.clientY < bounds.top || event.clientY > bounds.bottom) dialog.close();
+  });
   $("#close-detail").addEventListener("click", () => { ++detailSequence; $("#slide-dialog").close(); });
   $("#slide-form").addEventListener("submit", e => { e.preventDefault(); run(async () => {
     const data = Object.fromEntries(new FormData(e.target)); data.tags = data.tags.split(/[,，]/).map(t => t.trim()).filter(Boolean);

@@ -33,13 +33,16 @@ class Element {
     }
   }
   setAttribute(name, value) { this[name] = value; }
+  removeAttribute(name) { delete this[name]; }
+  showModal() { this.open = true; }
+  close() { this.open = false; }
   querySelector(selector) {
     return this.children.find(c => c.className === selector.slice(1)) || null;
   }
   remove() { this.parent.children = this.parent.children.filter(c => c !== this); }
 }
 
-function screen({ jobRecords = [], source = null } = {}) {
+function screen({ jobRecords = [], source = null, slideRecords = [] } = {}) {
   const controls = new Map(), panels = [], tabs = [], downloads = [], requests = [];
   for (const match of html.matchAll(/<([a-z][\w-]*)\b([^>]*)>/gi)) {
     const [, tag, attrs] = match, node = new Element(tag);
@@ -93,8 +96,8 @@ function screen({ jobRecords = [], source = null } = {}) {
       }
       const data = {
         "/api/crops": crops,
-        "/api/crops/exporters": [{id: "indexed-png", name: "类别索引 PNG"}, {id: "none", name: "无"}, {id: "custom", name: "Custom"}],
-        "/api/personal/slides": [], "/api/personal/jobs": [],
+        "/api/crops/exporters": [{id: "indexed-png", name: "类别索引 PNG"}, {id: "none", name: "无"}, {id: "segmentation-mask", name: "Segmentation Mask 1.1"}, {id: "custom", name: "Custom"}],
+        "/api/personal/slides": slideRecords, "/api/personal/jobs": [],
         "/api/personal/trash": [], "/api/personal/uploads": [],
         "/api/personal/account": { enabled: false },
         "/api/personal/overview": {
@@ -124,6 +127,7 @@ test("crop management initializes, filters, downloads and deletes selected crops
   assert.equal(get("#crops-grid").children.length, 2);
   assert.equal(get("#stats").children.length, 4);
   assert.equal(get("#download-crops").disabled, true);
+  assert.equal(get("#download-crop-labels").disabled, true);
 
   get("#crops-search").value = "alpha";
   await get("#crops-search").dispatch("input");
@@ -133,8 +137,8 @@ test("crop management initializes, filters, downloads and deletes selected crops
   assert.match(get("#selection-count").textContent, /已选 1 张/);
   await get("#download-crops").dispatch("click");
   const download = page.requests.find(r => r.endpoint === "/api/crops/batch-download");
-  assert.deepEqual(JSON.parse(download.options.body), { filenames: ["alpha.png"], include_manifest: true, label_format: "none" });
-  assert.equal(page.downloads[0].filename, "wsi-patchkit-crops.zip");
+  assert.deepEqual(JSON.parse(download.options.body), { filenames: ["alpha.png"], include_images: true, label_format: "none" });
+  assert.equal(page.downloads[0].filename, "wsi-patchkit-images.zip");
 
   get("#crops-search").value = "";
   await get("#crops-search").dispatch("input");
@@ -180,16 +184,56 @@ test("crop cards retain source coordinates and have no per-image actions", async
 });
 
 
-test("registered label formats are selectable for bundle downloads", async () => {
+test("annotation downloads use the selected format without images", async () => {
   const page = screen(), get = selector => page.controls.get(selector);
   await settle();
-  assert.deepEqual(get("#crop-label-format").options.map(o => o.value), ["indexed-png", "none", "custom"]);
-  assert.equal(get("#crop-label-format").value, "none");
+  assert.deepEqual(get("#crop-label-format").options.map(o => o.value), ["indexed-png", "segmentation-mask", "custom"]);
+  assert.equal(get("#crop-label-format").value, "segmentation-mask");
   get("#crop-label-format").value = "custom";
   await get("#crop-label-format").dispatch("change");
   get("#select-all").checked = true;
   await get("#select-all").dispatch("change");
-  await get("#download-crops").dispatch("click");
+  await get("#download-crop-labels").dispatch("click");
   const request = page.requests.find(r => r.endpoint === "/api/crops/batch-download");
   assert.equal(JSON.parse(request.options.body).label_format, "custom");
+  assert.equal(JSON.parse(request.options.body).include_images, false);
+  assert.equal(page.downloads[0].filename, "wsi-patchkit-annotations.zip");
+});
+
+
+test("thumbnail opens crop details and a source link with native coordinates", async () => {
+  const source = {slide_id: "slide / 测试", level: 2, region: {x: 11, y: 22, width: 333, height: 444}};
+  const page = screen({source, slideRecords: [{id: source.slide_id, path: "source.tif", tags: []}]}), get = selector => page.controls.get(selector);
+  await settle();
+  const slideCard = get("#slide-grid").children[0];
+  assert.match(slideCard.textContent, /切片详情/);
+  assert.match(slideCard.textContent, /查看与裁剪/);
+  const preview = get("#crops-grid").children[0].children[0];
+  assert.equal(preview.tag, "button");
+  assert.equal(preview["aria-haspopup"], "dialog");
+  await preview.dispatch("click");
+  assert.equal(get("#crop-detail-dialog").open, true);
+  assert.equal(get("#crop-detail-title").textContent, "alpha.png");
+  assert.equal(get("#crop-detail-preview").src, "/api/crops/alpha.png/image");
+  assert.match(get("#crop-detail-info").textContent, /source.tif/);
+  assert.match(get("#crop-detail-info").textContent, /Level 2/);
+  assert.equal(get("#crop-locate-source").hidden, false);
+  const params = new URL(get("#crop-locate-source").href, "http://testserver").searchParams;
+  for (const [key, value] of Object.entries({slide: source.slide_id, crop: "1", level: "2", x: "11", y: "22", width: "333", height: "444"})) assert.equal(params.get(key), value);
+  assert.match(get("#selection-count").textContent, /已选 0 张/);
+  await get("#close-crop-detail").dispatch("click");
+  assert.equal(get("#crop-detail-dialog").open, false);
+});
+
+test("details explain missing or unavailable sources without retaining a previous link", async () => {
+  for (const source of [null, {slide_id: "removed", level: 0, region: {x: 1, y: 2, width: 8, height: 8}}]) {
+    const page = screen({source}), get = selector => page.controls.get(selector);
+    await settle();
+    get("#crop-locate-source").href = "/?slide=previous";
+    await get("#crops-grid").children[0].children[0].dispatch("click");
+    assert.equal(get("#crop-detail-dialog").open, true);
+    assert.equal(get("#crop-locate-source").hidden, true);
+    assert.equal(get("#crop-locate-source").href, undefined);
+    assert.match(get("#crop-source-status").textContent, source ? /当前不可访问/ : /未记录来源坐标/);
+  }
 });

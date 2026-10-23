@@ -157,6 +157,70 @@ async def test_bundle_masks_metadata_export_and_delete(tmp_path, target_mpp, siz
         # An image-only export keeps the saved labels for subsequent exports.
         assert (bundle / "layer-0/mask.png").is_file()
 
+        formats = (await client.get("/api/crops/exporters")).json()
+        assert {
+            "id": "segmentation-mask",
+            "name": "Segmentation Mask 1.1",
+        } in formats
+        for method, url, kwargs in [
+            (
+                "get",
+                "/api/crops/sample.png/export?label_format=segmentation-mask&include_images=false",
+                {},
+            ),
+            (
+                "post",
+                "/api/crops/batch-download",
+                {
+                    "json": {
+                        "filenames": ["sample.png"],
+                        "label_format": "segmentation-mask",
+                        "include_images": False,
+                    }
+                },
+            ),
+        ]:
+            response = await client.request(method, url, **kwargs)
+            assert response.status_code == 200, response.text
+            with ZipFile(BytesIO(response.content)) as archive:
+                assert archive.read("ImageSets/Segmentation/default.txt") == b"sample\n"
+                assert archive.read("labelmap.txt").decode().splitlines() == [
+                    "background:0,0,0::",
+                    "normal:128,0,0::",
+                    "tumor:0,128,0::",
+                ]
+                with Image.open(
+                    BytesIO(archive.read("SegmentationClass/sample.png"))
+                ) as image:
+                    exported = np.array(image)
+                np.testing.assert_array_equal(
+                    np.any(exported != 0, axis=2), expected_coverage.astype(bool)
+                )
+                assert np.all(exported[(mask == 0) & (coverage == 1)] == [128, 0, 0])
+                assert np.all(exported[(mask == 300) & (coverage == 1)] == [0, 128, 0])
+                assert "sample.png" not in archive.namelist()
+                assert not any(".labels/" in name for name in archive.namelist())
+                assert set(
+                    name for name in archive.namelist() if name.endswith(".png")
+                ) == {"SegmentationClass/sample.png"}
+
+        response = await client.post(
+            "/api/crops/batch-download",
+            json={
+                "filenames": ["sample.png"],
+                "label_format": "none",
+                "include_images": True,
+            },
+        )
+        assert response.status_code == 200
+        with ZipFile(BytesIO(response.content)) as archive:
+            assert archive.namelist() == ["sample.png"]
+        response = await client.post(
+            "/api/crops/batch-download",
+            json={"filenames": ["sample.png"], "include_images": "false"},
+        )
+        assert response.status_code == 400
+
         def custom(bundle, archive):
             archive.writestr(
                 bundle.labels.name + "/custom.txt",
@@ -438,3 +502,86 @@ async def test_crop_rejects_invalid_class_filters(tmp_path):
                 },
             )
             assert response.status_code == 400, response.text
+
+
+def test_segmentation_mask_batch_layers_and_validation(tmp_path):
+    from wsi_patchkit.web.exporters import CropBundle
+
+    bundles = []
+    for name, class_id in [("one", 300), ("two", 65535)]:
+        image = tmp_path / f"{name}.png"
+        Image.new("RGB", (2, 1)).save(image)
+        labels = tmp_path / f"{name}.png.labels"
+        labels.mkdir()
+        Image.fromarray(np.array([[class_id, 0]], dtype="uint16")).save(
+            labels / "mask.png"
+        )
+        Image.fromarray(np.array([[1, 0]], dtype="uint8")).save(labels / "coverage.png")
+        (labels / "metadata.json").write_text(
+            json.dumps(
+                {
+                    "overlays": [
+                        {
+                            "id": "prediction",
+                            "classes": [{"id": class_id, "name": str(class_id)}],
+                            "mask": "mask.png",
+                            "coverage": "coverage.png",
+                        }
+                    ]
+                }
+            )
+        )
+        bundles.append(CropBundle(image, labels))
+
+    def export():
+        buffer = BytesIO()
+        with ZipFile(buffer, "w") as archive:
+            ExporterRegistry().export_many("segmentation-mask", bundles, archive)
+        return ZipFile(BytesIO(buffer.getvalue()))
+
+    with export() as archive:
+        assert archive.read("ImageSets/Segmentation/default.txt") == b"one\ntwo\n"
+        assert len(archive.namelist()) == len(set(archive.namelist()))
+        mapping = json.loads(archive.read("class-map.json"))["classes"]
+        assert [item["source_id"] for item in mapping] == [300, 65535]
+        with Image.open(BytesIO(archive.read("SegmentationClass/two.png"))) as image:
+            assert image.getpixel((0, 0)) == (0, 128, 0)
+            assert image.getpixel((1, 0)) == (0, 0, 0)
+    metadata_path = bundles[1].labels / "metadata.json"
+    metadata = json.loads(metadata_path.read_text())
+    metadata["overlays"][0]["id"] = "other/../../layer"
+    metadata_path.write_text(json.dumps(metadata))
+    with export() as archive:
+        datasets = json.loads(archive.read("segmentation-datasets.json"))
+        assert len(datasets) == 2
+        for dataset in datasets:
+            with ZipFile(BytesIO(archive.read(dataset["archive"]))) as nested:
+                assert "labelmap.txt" in nested.namelist()
+                assert not any(".labels/" in name for name in nested.namelist())
+                assert all(
+                    name.startswith("SegmentationClass/")
+                    for name in nested.namelist()
+                    if name.endswith(".png")
+                )
+                assert (
+                    len(nested.read("ImageSets/Segmentation/default.txt").splitlines())
+                    == 1
+                )
+    metadata["overlays"][0]["mask"] = "../one.png.labels/mask.png"
+    metadata_path.write_text(json.dumps(metadata))
+    with pytest.raises(ValueError, match="invalid crop bundle"):
+        export()
+
+
+def test_segmentation_mask_requires_saved_labels(tmp_path):
+    from wsi_patchkit.web.exporters import CropBundle
+
+    with (
+        ZipFile(BytesIO(), "w") as archive,
+        pytest.raises(ValueError, match="没有类别掩码"),
+    ):
+        ExporterRegistry().export_many(
+            "segmentation-mask",
+            [CropBundle(tmp_path / "old.png", tmp_path / "old.png.labels")],
+            archive,
+        )
