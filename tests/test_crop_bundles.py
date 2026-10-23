@@ -10,6 +10,7 @@ import pytest
 import tifffile
 from PIL import Image
 
+pytest.importorskip("fastapi")
 httpx = pytest.importorskip("httpx2")
 
 from wsi_patchkit.web import (  # noqa: E402

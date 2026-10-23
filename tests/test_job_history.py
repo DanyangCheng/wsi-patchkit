@@ -5,7 +5,9 @@ import sqlite3
 
 import pytest
 
-from wsi_patchkit.web.personal_store import PersonalStore
+pytest.importorskip("fastapi")
+
+from wsi_patchkit.web.personal_store import PersonalStore  # noqa: E402
 
 
 def record(key, *, slide="slide", status="completed", created=100, updated=None):
